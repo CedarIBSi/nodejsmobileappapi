@@ -2,6 +2,8 @@
 
 TypeScript/Express backend for the IBS Intelligence React Native/Expo app. PostgreSQL stores application users, subscriptions, entitlements, monthly article access, push tokens, reading history, and saved articles. WordPress remains the source of news content; this API stores WordPress news article IDs as text.
 
+For the current complete endpoint, environment, deployment, testing, and troubleshooting reference, see [API_DOCUMENTATION.md](API_DOCUMENTATION.md).
+
 ## Requirements
 
 - Node.js 20+

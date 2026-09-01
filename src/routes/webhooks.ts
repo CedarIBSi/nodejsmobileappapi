@@ -1,112 +1,179 @@
 import crypto from "node:crypto";
 import { Router } from "express";
-import { config } from "../config.js";
 import { transaction } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
+import { getGoogleSubscription, verifyPubSubPushToken } from "../services/googlePlay.js";
+import { decodeAppleTransaction, mapAppleStatus, verifyAppleNotification } from "../services/appStore.js";
+import { reconcileStoreSubscription } from "../lib/subscriptionReconcile.js";
 
-type Entity = Record<string, unknown>;
-type RazorpayEvent = {
-  event?: string;
-  created_at?: number;
-  payload?: {
-    subscription?: { entity?: Entity };
-    payment?: { entity?: Entity };
+// Store webhooks only: Google Play RTDN and Apple App Store server
+// notifications, both verified before anything is written.
+export const webhookRouter = Router();
+
+type GoogleDeveloperNotification = {
+  subscriptionNotification?: {
+    notificationType?: number;
+    purchaseToken?: string;
+    subscriptionId?: string;
   };
 };
 
-export const webhookRouter = Router();
-const handledEvents = new Set([
-  "subscription.activated", "subscription.charged", "subscription.cancelled",
-  "subscription.paused", "subscription.resumed", "subscription.completed", "payment.failed"
-]);
+// Google Play Real-time Developer Notifications arrive as a Pub/Sub push
+// message: a JSON envelope whose `message.data` is the actual notification,
+// base64-encoded. Authenticity comes from the OIDC bearer token Pub/Sub
+// attaches to the push (verifyPubSubPushToken), not a body signature - there
+// is no HMAC here, so this only needs the raw body for JSON parsing
+// consistency with the rest of this router, not for verification.
+webhookRouter.post("/google-play", asyncHandler(async (req, res) => {
+  await verifyPubSubPushToken(req.header("authorization"));
 
-function safeEqual(signature: string, expected: string) {
-  const a = Buffer.from(signature, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-webhookRouter.post("/razorpay", asyncHandler(async (req, res) => {
   if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Raw webhook body required", "INVALID_BODY");
-  const signature = req.header("x-razorpay-signature");
-  if (!signature) throw new HttpError(401, "Webhook signature missing", "INVALID_SIGNATURE");
-  const expected = crypto.createHmac("sha256", config().RAZORPAY_WEBHOOK_SECRET).update(req.body).digest("hex");
-  if (!safeEqual(signature, expected)) throw new HttpError(401, "Invalid webhook signature", "INVALID_SIGNATURE");
-
-  let event: RazorpayEvent;
+  let envelope: { message?: { data?: string; messageId?: string } };
   try {
-    event = JSON.parse(req.body.toString("utf8")) as RazorpayEvent;
+    envelope = JSON.parse(req.body.toString("utf8"));
   } catch {
     throw new HttpError(400, "Invalid JSON payload", "INVALID_BODY");
   }
-  const eventType = event.event ?? "unknown";
-  const eventId = req.header("x-razorpay-event-id") ?? crypto.createHash("sha256").update(req.body).digest("hex");
-  const subscriptionEntity = event.payload?.subscription?.entity;
-  const paymentEntity = event.payload?.payment?.entity;
-  const subscriptionId = String(subscriptionEntity?.id ?? paymentEntity?.subscription_id ?? "") || null;
-  const paymentId = String(paymentEntity?.id ?? "") || null;
+
+  const message = envelope.message;
+  if (!message?.data) {
+    res.json({ received: true, status: "ignored" });
+    return;
+  }
+
+  let notification: GoogleDeveloperNotification;
+  try {
+    notification = JSON.parse(Buffer.from(message.data, "base64").toString("utf8"));
+  } catch {
+    throw new HttpError(400, "Invalid notification payload", "INVALID_BODY");
+  }
+
+  const purchaseToken = notification.subscriptionNotification?.purchaseToken ?? null;
+  // Pub/Sub's own delivery id is a reasonable idempotency key - it can
+  // redeliver the same message, but never issues a fresh id for a retry.
+  const eventId = message.messageId ?? crypto.randomUUID();
+  const eventType = String(notification.subscriptionNotification?.notificationType ?? "unknown");
 
   const outcome = await transaction(async (client) => {
     const inserted = await client.query<{ id: string }>(
-      `INSERT INTO payment_events
-         (razorpay_event_id, event_type, razorpay_payment_id, razorpay_subscription_id, payload_json)
-       VALUES ($1, $2, $3, $4, $5::jsonb)
-       ON CONFLICT (razorpay_event_id) DO NOTHING RETURNING id`,
-      [eventId, eventType, paymentId, subscriptionId, JSON.stringify(event)]
+      `INSERT INTO store_events (provider, provider_event_id, event_type, provider_subscription_id, payload_json)
+       VALUES ('google_play', $1, $2, $3, $4::jsonb)
+       ON CONFLICT (provider, provider_event_id) DO NOTHING RETURNING id`,
+      [eventId, eventType, purchaseToken, JSON.stringify(notification)]
     );
     if (!inserted.rowCount) return "duplicate";
 
-    if (handledEvents.has(eventType) && subscriptionId) {
-      const local = await client.query<{ id: string; user_id: string }>(
-        "SELECT id, user_id FROM subscriptions WHERE razorpay_subscription_id = $1 FOR UPDATE",
-        [subscriptionId]
+    if (purchaseToken) {
+      // Only a purchase already confirmed through POST /verify-purchase can
+      // be matched to a user - Google's notification carries no app user
+      // identifier of its own. A notification arriving first (a race with
+      // verify-purchase, or for a purchase this backend never saw) is
+      // recorded in store_events for later reconciliation, not dropped.
+      const existing = await client.query<{ id: string; local_plan_id: string; user_id: string }>(
+        `SELECT id, user_id, local_plan_id FROM subscriptions
+         WHERE provider = 'google_play' AND provider_subscription_id = $1 FOR UPDATE`,
+        [purchaseToken]
       );
-      const subscription = local.rows[0];
-      if (subscription) {
-        await client.query("UPDATE payment_events SET user_id = $2 WHERE id = $1", [inserted.rows[0]!.id, subscription.user_id]);
-        const remoteStatus = String(subscriptionEntity?.status ?? "");
-        const statusByEvent: Record<string, string> = {
-          "subscription.activated": "active",
-          "subscription.charged": "active",
-          "subscription.cancelled": "cancelled",
-          "subscription.paused": "paused",
-          "subscription.resumed": "active",
-          "subscription.completed": "completed"
-        };
-        const status = remoteStatus || statusByEvent[eventType];
-        if (status) {
-          await client.query(
-            `UPDATE subscriptions SET status = $2, provider = 'razorpay',
-               provider_subscription_id = COALESCE(provider_subscription_id, razorpay_subscription_id),
-               current_start = COALESCE(to_timestamp($3), current_start),
-               current_end = COALESCE(to_timestamp($4), current_end),
-               cancelled_at = CASE WHEN $2 = 'cancelled' THEN now() ELSE cancelled_at END,
-               updated_at = now() WHERE id = $1`,
-            [subscription.id, status, subscriptionEntity?.current_start ?? null, subscriptionEntity?.current_end ?? null]
-          );
-        }
+      const local = existing.rows[0];
 
-        if (["subscription.activated", "subscription.charged", "subscription.resumed"].includes(eventType)) {
-          await client.query(
-            `INSERT INTO entitlements
-               (user_id, subscription_id, entitlement_type, status, starts_at, ends_at, source)
-             VALUES ($1, $2, 'premium_news', 'active', COALESCE(to_timestamp($3), now()), to_timestamp($4), 'razorpay')
-             ON CONFLICT (subscription_id, entitlement_type) DO UPDATE SET
-               status = 'active', starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at, updated_at = now()`,
-            [subscription.user_id, subscription.id, subscriptionEntity?.current_start ?? null, subscriptionEntity?.current_end ?? null]
-          );
-        } else if (["subscription.cancelled", "subscription.paused", "subscription.completed"].includes(eventType)) {
-          await client.query(
-            `UPDATE entitlements SET status = $2, ends_at = COALESCE(ends_at, now()), updated_at = now()
-             WHERE subscription_id = $1 AND status = 'active'`,
-            [subscription.id, eventType === "subscription.paused" ? "paused" : "inactive"]
-          );
-        }
+      if (local) {
+        await client.query("UPDATE store_events SET user_id = $2 WHERE id = $1", [
+          inserted.rows[0]!.id,
+          local.user_id
+        ]);
+        // Re-fetched rather than trusting the notification's own fields -
+        // same "treat it as a signal to look up the real state" approach
+        // getGoogleSubscription documents.
+        const summary = await getGoogleSubscription(purchaseToken);
+        await reconcileStoreSubscription(client, {
+          cancelledAt: summary.state === "canceled" ? new Date() : null,
+          currentEnd: summary.currentEnd,
+          currentStart: summary.currentStart,
+          environment: summary.isTestPurchase ? "sandbox" : "production",
+          planId: local.local_plan_id,
+          provider: "google_play",
+          providerSubscriptionId: purchaseToken,
+          status: summary.state,
+          userId: local.user_id
+        });
       }
     }
-    await client.query("UPDATE payment_events SET processed_at = now() WHERE id = $1", [inserted.rows[0]!.id]);
+
+    await client.query("UPDATE store_events SET processed_at = now() WHERE id = $1", [inserted.rows[0]!.id]);
     return "processed";
   });
+
+  res.json({ received: true, status: outcome });
+}));
+
+// App Store Server Notifications V2 post a single top-level `signedPayload`
+// JWS. verifyAppleNotification checks Apple's signature chain (using the
+// root certificates in APPLE_ROOT_CERTS_DIR) before any of it is trusted.
+webhookRouter.post("/apple", asyncHandler(async (req, res) => {
+  if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Raw webhook body required", "INVALID_BODY");
+  let envelope: { signedPayload?: string };
+  try {
+    envelope = JSON.parse(req.body.toString("utf8"));
+  } catch {
+    throw new HttpError(400, "Invalid JSON payload", "INVALID_BODY");
+  }
+  if (!envelope.signedPayload) throw new HttpError(400, "signedPayload required", "INVALID_BODY");
+
+  const notification = await verifyAppleNotification(envelope.signedPayload).catch(() => {
+    throw new HttpError(401, "Invalid Apple notification signature", "INVALID_SIGNATURE");
+  });
+
+  const signedTransactionInfo = notification.data?.signedTransactionInfo;
+  const decodedTransaction = signedTransactionInfo
+    ? await decodeAppleTransaction(signedTransactionInfo)
+    : null;
+  const originalTransactionId = decodedTransaction?.originalTransactionId ?? null;
+  // notificationUUID is Apple's own idempotency key for this delivery.
+  const eventId =
+    notification.notificationUUID ?? crypto.createHash("sha256").update(req.body).digest("hex");
+  const eventType = String(notification.notificationType ?? "unknown");
+
+  const outcome = await transaction(async (client) => {
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO store_events (provider, provider_event_id, event_type, provider_subscription_id, payload_json)
+       VALUES ('apple', $1, $2, $3, $4::jsonb)
+       ON CONFLICT (provider, provider_event_id) DO NOTHING RETURNING id`,
+      [eventId, eventType, originalTransactionId, JSON.stringify(notification)]
+    );
+    if (!inserted.rowCount) return "duplicate";
+
+    if (originalTransactionId && notification.data?.status !== undefined) {
+      const existing = await client.query<{ id: string; local_plan_id: string; user_id: string }>(
+        `SELECT id, user_id, local_plan_id FROM subscriptions
+         WHERE provider = 'apple' AND provider_subscription_id = $1 FOR UPDATE`,
+        [originalTransactionId]
+      );
+      const local = existing.rows[0];
+
+      if (local) {
+        await client.query("UPDATE store_events SET user_id = $2 WHERE id = $1", [
+          inserted.rows[0]!.id,
+          local.user_id
+        ]);
+        const state = mapAppleStatus(notification.data.status);
+        await reconcileStoreSubscription(client, {
+          cancelledAt: state === "revoked" ? new Date() : null,
+          currentEnd: decodedTransaction?.expiresDate ? new Date(decodedTransaction.expiresDate) : null,
+          currentStart: null,
+          environment: notification.data.environment === "Production" ? "production" : "sandbox",
+          planId: local.local_plan_id,
+          provider: "apple",
+          providerSubscriptionId: originalTransactionId,
+          status: state,
+          userId: local.user_id
+        });
+      }
+    }
+
+    await client.query("UPDATE store_events SET processed_at = now() WHERE id = $1", [inserted.rows[0]!.id]);
+    return "processed";
+  });
+
   res.json({ received: true, status: outcome });
 }));

@@ -63,7 +63,7 @@ const namedEntities: Record<string, string> = {
   quot: '"'
 };
 
-function decodeEntities(value: string): string {
+export function decodeEntities(value: string): string {
   return value.replace(entityPattern, (match, entity: string) => {
     if (entity.startsWith("#x") || entity.startsWith("#X")) {
       return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
@@ -75,12 +75,12 @@ function decodeEntities(value: string): string {
   });
 }
 
-function toText(html = ""): string {
+export function toText(html = ""): string {
   return decodeEntities(html.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
 }
 
 /** Keeps paragraph and list breaks so the app can render readable body text. */
-function htmlToPlainText(html = ""): string {
+export function htmlToPlainText(html = ""): string {
   return decodeEntities(
     html
       .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -372,6 +372,10 @@ export async function listPodcasts(page: number, limit: number): Promise<MediaPa
     return { items: posts.map(toPodcast), total };
   });
 }
+
+// Galaxy screen content is no longer fetched live from here - this server's
+// outbound requests to WordPress are blocked by Cloudflare bot protection.
+// See src/lib/galaxy-content.ts and src/services/galaxyContent.ts.
 
 export async function listVideos(page: number, limit: number): Promise<MediaPage<VideoItem>> {
   return cached(`videos:${page}:${limit}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {

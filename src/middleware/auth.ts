@@ -10,7 +10,8 @@ export const verifyFirebaseToken: RequestHandler = asyncHandler(async (req, _res
   try {
     req.firebaseUser = await firebaseAuth().verifyIdToken(authorization.slice(7), true);
     next();
-  } catch {
+  } catch (err) {
+    req.log.warn({ err }, "Firebase token verification failed");
     throw new HttpError(401, "Invalid or expired Firebase token", "UNAUTHORIZED");
   }
 });
@@ -38,7 +39,8 @@ export const resolveOptionalUser: RequestHandler = asyncHandler(async (req, _res
   if (!authorization.startsWith("Bearer ")) throw new HttpError(401, "Invalid authorization header", "UNAUTHORIZED");
   try {
     req.firebaseUser = await firebaseAuth().verifyIdToken(authorization.slice(7), true);
-  } catch {
+  } catch (err) {
+    req.log.warn({ err }, "Firebase token verification failed");
     throw new HttpError(401, "Invalid or expired Firebase token", "UNAUTHORIZED");
   }
   const result = await query<NonNullable<Express.Request["appUser"]>>(

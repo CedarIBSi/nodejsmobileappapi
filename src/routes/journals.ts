@@ -11,8 +11,19 @@ import { createJournalToken, verifyJournalToken } from "../lib/journal-token.js"
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
+import { getJournalAbout } from "../services/journalAboutContent.js";
 
 export const journalRouter = Router();
+const journalAboutCacheSeconds = 300;
+
+// Public: the "About the Journal" / "Why IBSi FinTech Journal" copy is
+// marketing content, not gated archive content, so it does not go through
+// privateRoute the way the listing below does.
+journalRouter.get("/about", asyncHandler(async (_req, res) => {
+  const editions = await getJournalAbout();
+  res.set("Cache-Control", `public, max-age=${journalAboutCacheSeconds}`);
+  res.json({ editions });
+}));
 
 type JournalRow = {
   journal_id: string;

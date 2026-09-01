@@ -9,9 +9,13 @@ import { entitlementRouter } from "./routes/entitlements.js";
 import { healthRouter } from "./routes/health.js";
 import { podcastRouter, videoRouter } from "./routes/media.js";
 import { newsRouter } from "./routes/news.js";
+import { galaxyRouter } from "./routes/galaxy.js";
+import { awardsRouter } from "./routes/awards.js";
+import { adsRouter } from "./routes/ads.js";
 import { journalRouter } from "./routes/journals.js";
 import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
+import { notificationRouter } from "./routes/notifications.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { webhookRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/error-handler.js";
@@ -23,7 +27,7 @@ export function createApp() {
   app.set("trust proxy", 1);
   app.use(pinoHttp({
     level: env.LOG_LEVEL,
-    redact: ["req.headers.authorization", "req.headers.x-razorpay-signature"],
+    redact: ["req.headers.authorization"],
     // Journal and white paper view URLs contain a temporary bearer credential
     // in the path. Avoid writing it to application access logs.
     autoLogging: {
@@ -37,7 +41,8 @@ export function createApp() {
   app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
   app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }));
 
-  // Signature verification requires the exact bytes received from Razorpay.
+  // Apple's signedPayload JWS must be verified over the exact bytes received,
+  // so the webhook router gets the raw body rather than parsed JSON.
   app.use("/v1/webhooks", express.raw({ type: "application/json", limit: "1mb" }), webhookRouter);
   app.use(express.json({ limit: "1mb" }));
 
@@ -82,7 +87,11 @@ export function createApp() {
   app.use("/v1/subscription", subscriptionRouter);
   app.use("/v1/entitlements", entitlementRouter);
   app.use("/v1/push-token", pushTokenRouter);
+  app.use("/v1/notifications", notificationRouter);
   app.use("/v1/news", newsRouter);
+  app.use("/v1/galaxy", galaxyRouter);
+  app.use("/v1/awards", awardsRouter);
+  app.use("/v1/ads", adsRouter);
   app.use("/v1/journals", journalRouter);
   app.use("/v1/whitepapers", whitepaperRouter);
   app.use("/v1/podcasts", podcastRouter);

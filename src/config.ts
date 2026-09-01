@@ -23,9 +23,31 @@ const schema = z.object({
   FIREBASE_CLIENT_EMAIL: z.string().email(),
   FIREBASE_PRIVATE_KEY: z.string().min(1),
   FIREBASE_SERVICE_ACCOUNT_FILE: z.string().default(""),
-  RAZORPAY_KEY_ID: z.string().min(1),
-  RAZORPAY_KEY_SECRET: z.string().min(1),
-  RAZORPAY_WEBHOOK_SECRET: z.string().min(1),
+  // Google Play Billing and Apple In-App Purchase verification. Optional at
+  // startup, same as the journal/whitepaper signing secrets - the console
+  // setup (service account, App Store Connect API key) happens on its own
+  // timeline, and these routes fail closed (503) rather than block the rest
+  // of the API from starting while that's in progress.
+  GOOGLE_PLAY_PACKAGE_NAME: z.string().min(1).optional(),
+  GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().email().optional(),
+  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().min(1).optional(),
+  // The Pub/Sub push subscription's configured OIDC audience (usually this
+  // endpoint's own URL) and the service account it signs push requests with
+  // (Play's default notifications publisher unless a custom one was set up)
+  // - together these confirm a /v1/webhooks/google-play request really came
+  // from Pub/Sub and not an unauthenticated caller.
+  GOOGLE_PUBSUB_AUDIENCE: z.string().url().optional(),
+  GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL: z.string().email().optional(),
+  APPLE_ISSUER_ID: z.string().min(1).optional(),
+  APPLE_KEY_ID: z.string().min(1).optional(),
+  APPLE_PRIVATE_KEY: z.string().min(1).optional(),
+  APPLE_BUNDLE_ID: z.string().min(1).optional(),
+  APPLE_APP_APPLE_ID: z.coerce.number().int().positive().optional(),
+  APPLE_ENVIRONMENT: z.enum(["Sandbox", "Production"]).default("Sandbox"),
+  // Root certificates downloaded by hand from https://www.apple.com/certificateauthority/
+  // (Apple publishes no API for these). Verification fails closed if this
+  // directory is missing or empty rather than skip the check.
+  APPLE_ROOT_CERTS_DIR: z.string().min(1).default("C:\\ibsi-pdfs\\apple-root-certs"),
   APP_BASE_URL: z.string().url(),
   MOBILE_APP_SCHEME: z.string().regex(/^[a-z][a-z0-9+.-]*$/i).default("ibsintelligence"),
   CORS_ORIGINS: z.string().default(""),
@@ -83,7 +105,9 @@ export function config(): Config {
   }
   cached = {
     ...result.data,
-    FIREBASE_PRIVATE_KEY: result.data.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+    FIREBASE_PRIVATE_KEY: result.data.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: result.data.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    APPLE_PRIVATE_KEY: result.data.APPLE_PRIVATE_KEY?.replace(/\\n/g, "\n")
   };
   return cached;
 }
