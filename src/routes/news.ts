@@ -7,18 +7,29 @@ import { HttpError } from "../lib/errors.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute, resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { getArticleBody, listNews, listNewsCategories } from "../services/wordpress.js";
+import {
+  getArticleContent,
+  listNews,
+  listNewsCategories,
+  searchNews
+} from "../services/wordpress.js";
 
 export const newsRouter = Router();
 
 const articleSchema = z.object({ news_article_id: z.string().trim().min(1).max(255) });
 const articleParams = z.object({ news_article_id: z.string().trim().min(1).max(255) });
+const articleBodyQuery = z.object({ installation_id: z.uuid().optional() });
 const accessSchema = z.object({
   news_article_id: z.string().trim().min(1).max(255),
   installation_id: z.uuid().optional()
 });
 const newsListSchema = paginationSchema.extend({
   category: z.coerce.number().int().positive().optional()
+});
+const newsSearchSchema = newsListSchema.extend({
+  // Two characters is the shortest useful term; the cap keeps a pathological
+  // query out of the cache key.
+  q: z.string().trim().min(2).max(120)
 });
 
 /**
@@ -27,6 +38,53 @@ const newsListSchema = paginationSchema.extend({
  * not survive app-scale traffic.
  */
 const publicCacheSeconds = 300;
+
+/** The meter's period, in the timezone the free allowance is counted in. */
+async function currentPeriodStart(): Promise<string> {
+  const result = await query<{ period_start: string }>(
+    "SELECT date_trunc('month', timezone('Asia/Kolkata', now()))::date::text AS period_start"
+  );
+  return result.rows[0]!.period_start;
+}
+
+/**
+ * Whether this reader may be served the body of one article.
+ *
+ * Deliberately does not consume a free article: POST /access is the single
+ * place that spends one, and the app calls it before opening a story. This
+ * asks only whether the spend already happened - so a reader who opened the
+ * article legitimately can re-read it, and a caller who skipped /access
+ * entirely gets nothing.
+ */
+async function mayReadArticleBody(input: {
+  articleId: string;
+  installationId?: string;
+  role?: string | null;
+  userId: string | null;
+}): Promise<boolean> {
+  if (isStaffRole(input.role)) return true;
+
+  if (input.userId) {
+    const entitlement = await query(
+      `SELECT 1 FROM entitlements WHERE user_id = $1 AND status = 'active'
+       AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) LIMIT 1`,
+      [input.userId]
+    );
+    if (entitlement.rowCount) return true;
+  }
+
+  const identityColumn = input.userId ? "user_id" : "installation_id";
+  const identityValue = input.userId ?? input.installationId;
+  if (!identityValue) return false;
+
+  const consumed = await query(
+    `SELECT 1 FROM news_article_access
+     WHERE ${identityColumn} = $1 AND news_article_id = $2 AND period_start = $3`,
+    [identityValue, input.articleId, await currentPeriodStart()]
+  );
+  return Boolean(consumed.rowCount);
+}
+
 
 newsRouter.get("/", validate(newsListSchema, "query"), asyncHandler(async (req, res) => {
   const { category, limit, page } = req.query as unknown as {
@@ -39,25 +97,76 @@ newsRouter.get("/", validate(newsListSchema, "query"), asyncHandler(async (req, 
   res.json({ articles: items, pagination: pagination(page, limit, total) });
 }));
 
+newsRouter.get("/search", validate(newsSearchSchema, "query"), asyncHandler(async (req, res) => {
+  const { category, limit, page, q } = req.query as unknown as {
+    category?: number;
+    limit: number;
+    page: number;
+    q: string;
+  };
+  const { items, total } = await searchNews(q, page, limit, category);
+  res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
+  res.json({ articles: items, pagination: pagination(page, limit, total) });
+}));
+
 newsRouter.get("/categories", asyncHandler(async (_req, res) => {
   const categories = await listNewsCategories();
   res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
   res.json({ categories });
 }));
 
+// The article body is the paywalled thing itself, so the meter is enforced
+// here and not only in the client that calls POST /access. Without this the
+// five-article allowance is advisory: the id is in every listing response, and
+// the body was served to anyone who asked for it.
 newsRouter.get(
   "/articles/:news_article_id",
+  resolveOptionalUser,
   validate(articleParams, "params"),
+  validate(articleBodyQuery, "query"),
   asyncHandler(async (req, res) => {
     const { news_article_id: articleId } = req.params as { news_article_id: string };
-    const body = await getArticleBody(articleId);
+    const { installation_id: installationId } = req.query as unknown as {
+      installation_id?: string;
+    };
 
-    if (body === null) {
+    const allowed = await mayReadArticleBody({
+      articleId,
+      installationId,
+      role: req.appUser?.role,
+      userId: req.appUser?.id ?? null
+    });
+
+    if (!allowed) {
+      // Same envelope POST /access answers 402 with, so the app's existing
+      // paywall handling reads this response without a second code path.
+      res.status(402).json({
+        access: {
+          allowed: false,
+          reason: "monthly_limit_reached",
+          remaining_free_articles: 0,
+          period_timezone: "Asia/Kolkata",
+          requires_authentication: !req.appUser,
+          requires_subscription: true
+        }
+      });
+      return;
+    }
+
+    const content = await getArticleContent(articleId);
+
+    if (content === null || content.text === null) {
       throw new HttpError(404, "Article not found", "ARTICLE_NOT_FOUND");
     }
 
-    res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
-    res.json({ article: { body, id: articleId } });
+    // Not `public`: the answer now depends on who asked, so a shared cache
+    // holding one reader's copy would hand it to everyone behind that edge.
+    res.set("Cache-Control", "private, no-store");
+    // `body` stays the flattened text every shipped build reads; `body_html`
+    // is additive, for clients that can render the real markup.
+    res.json({
+      article: { body: content.text, body_html: content.html, id: articleId }
+    });
   })
 );
 

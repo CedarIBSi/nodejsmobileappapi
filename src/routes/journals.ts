@@ -62,6 +62,38 @@ function journalImageUrl(imagePath: string | null): string | null {
   return new URL(encodeURIComponent(filename), baseUrl).toString();
 }
 
+/**
+ * The years and edition types that actually exist, so the app can offer the
+ * whole archive as filters. The app previously learned its options from the
+ * rows it had already paged through, which meant a reader could not filter to
+ * 2019 until they had scrolled back to 2019.
+ *
+ * Same access rule as the listing: this describes gated content.
+ */
+journalRouter.get("/filters", ...privateRoute, asyncHandler(async (req, res) => {
+  await requireJournalAccess(req.appUser!);
+
+  const published = "WHERE redirect_page IS NOT NULL AND btrim(redirect_page) <> ''";
+  const [years, editions] = await Promise.all([
+    query<{ year: string }>(
+      `SELECT DISTINCT year FROM pv_ibsi_journal_data ${published}
+       AND year IS NOT NULL AND btrim(year) <> ''
+       ORDER BY year DESC`
+    ),
+    query<{ edition_type: string }>(
+      `SELECT DISTINCT edition_type FROM pv_ibsi_journal_data ${published}
+       AND edition_type IS NOT NULL AND btrim(edition_type) <> ''
+       ORDER BY edition_type`
+    )
+  ]);
+
+  res.set("Cache-Control", "private, max-age=300");
+  res.json({
+    editions: editions.rows.map((row) => row.edition_type),
+    years: years.rows.map((row) => row.year)
+  });
+}));
+
 journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHandler(async (req, res) => {
   await requireJournalAccess(req.appUser!);
   const { page, limit, year, edition_type: editionType, search } = req.query as unknown as {

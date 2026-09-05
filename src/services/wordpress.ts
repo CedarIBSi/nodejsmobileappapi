@@ -328,6 +328,44 @@ export async function listNews(
   });
 }
 
+/**
+ * Search runs over the whole archive rather than the rolling window the feed
+ * uses: someone looking for a named deal or vendor usually wants the piece
+ * that ran two years ago, not only what is recent. Results are cached per
+ * term and page, so a popular query costs WordPress one request, not one per
+ * reader - which is the point of routing search through here at all.
+ */
+export async function searchNews(
+  term: string,
+  page: number,
+  limit: number,
+  categoryId?: number
+): Promise<MediaPage<NewsItem>> {
+  const query = term.trim();
+  const key = `news:search:${query.toLowerCase()}:${page}:${limit}:${categoryId ?? "all"}`;
+
+  return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const params: Record<string, string> = { orderby: "relevance", search: query };
+    if (categoryId) params.categories = String(categoryId);
+
+    const { posts, total } = await fetchPostType("ibsi_news", page, limit, {
+      fields: newsListFields,
+      params
+    });
+
+    const items = posts.map((post) => ({
+      excerpt: toText(post.excerpt?.rendered) || null,
+      id: post.id,
+      image_url: featuredImage(post),
+      link: post.link ?? "",
+      published_at: toIsoTimestamp(post.date_gmt),
+      title: toText(post.title?.rendered)
+    }));
+
+    return { items, total };
+  });
+}
+
 export async function listNewsCategories(): Promise<NewsCategoryItem[]> {
   return cached("news:categories", config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
     const url = new URL("/wp-json/wp/v2/categories", config().WORDPRESS_BASE_URL);
@@ -352,18 +390,38 @@ export async function listNewsCategories(): Promise<NewsCategoryItem[]> {
 }
 
 /** One article's body, as plain text ready for the app to render. */
-export async function getArticleBody(articleId: string): Promise<string | null> {
-  return cached(`news:article:${articleId}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
-    const url = new URL(
-      `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(articleId)}`,
-      config().WORDPRESS_BASE_URL
-    );
-    url.searchParams.set("_fields", "id,content");
+export type ArticleContent = { html: string | null; text: string | null };
 
-    const response = await wordPressRequest(url, "application/json");
-    const post = (await response.json()) as WordPressPost;
-    return htmlToPlainText(post.content?.rendered) || null;
-  });
+/**
+ * Both renderings of the body. `text` is what every shipped app build reads and
+ * must keep working; `html` is the same content unflattened, so a newer client
+ * can render the headings, links and inline images that htmlToPlainText throws
+ * away. The cache key is versioned because the cached value used to be a bare
+ * string.
+ */
+export async function getArticleContent(articleId: string): Promise<ArticleContent | null> {
+  return cached(
+    `news:article:v2:${articleId}`,
+    config().MEDIA_CACHE_TTL_SECONDS * 1000,
+    async () => {
+      const url = new URL(
+        `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(articleId)}`,
+        config().WORDPRESS_BASE_URL
+      );
+      url.searchParams.set("_fields", "id,content");
+
+      const response = await wordPressRequest(url, "application/json");
+      const post = (await response.json()) as WordPressPost;
+      const html = post.content?.rendered ?? null;
+      const text = htmlToPlainText(post.content?.rendered) || null;
+
+      return text || html ? { html, text } : null;
+    }
+  );
+}
+
+export async function getArticleBody(articleId: string): Promise<string | null> {
+  return (await getArticleContent(articleId))?.text ?? null;
 }
 
 export async function listPodcasts(page: number, limit: number): Promise<MediaPage<PodcastItem>> {

@@ -23,3 +23,23 @@ pushTokenRouter.post("/", ...privateRoute, validate(schema), asyncHandler(async 
   );
   res.json({ push_token: result.rows[0] });
 }));
+
+const deleteSchema = z.object({
+  expo_push_token: z.string().min(20).max(4096)
+});
+
+/**
+ * Turning notifications off. The row is the only thing that makes this device
+ * reachable, so deleting it is what actually stops the sending - revoking the
+ * OS permission alone would leave the backend pushing to a token that silently
+ * goes nowhere.
+ *
+ * Scoped to the caller: a token can only be removed by the user it belongs to.
+ */
+pushTokenRouter.delete("/", ...privateRoute, validate(deleteSchema), asyncHandler(async (req, res) => {
+  await query(
+    "DELETE FROM push_tokens WHERE user_id = $1 AND expo_push_token = $2",
+    [req.appUser!.id, req.body.expo_push_token]
+  );
+  res.status(204).send();
+}));

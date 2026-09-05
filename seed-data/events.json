@@ -1,0 +1,168 @@
+{
+  "intro": "The Cedar-IBSi summit series and the boardroom conversations around it - who is convening, where, and when.",
+  "upcoming": [
+    {
+      "id": "2026-dubai-building-a-future-ready-bank",
+      "title": "Building a Future-Ready Bank",
+      "summary": "The Cedar-IBSi Dubai Summit, where banking leaders convene to build the future-ready bank.",
+      "dateLabel": "30 September 2026",
+      "city": "Dubai, UAE",
+      "venue": null,
+      "imageUrl": "https://cedaribsi.events/images/banner/2026-Sep-Dubai-Event.webp",
+      "featured": true,
+      "registrationEmail": null,
+      "startsOn": "2026-09-30"
+    },
+    {
+      "id": "2026-muscat-building-a-future-ready-bank",
+      "title": "Building a Future-Ready Bank",
+      "summary": "The Cedar-IBSi Muscat Summit, where banking leaders convene to build the future-ready bank.",
+      "dateLabel": "28 October 2026",
+      "city": "Muscat, Oman",
+      "venue": null,
+      "imageUrl": "https://cedaribsi.events/images/gallery/2026-11-IBSi-Muscat/2026IBSi11Muscat.png",
+      "featured": false,
+      "registrationEmail": null,
+      "startsOn": "2026-10-28"
+    },
+    {
+      "id": "2026-mumbai-building-a-future-ready-bank",
+      "title": "Building a Future-Ready Bank",
+      "summary": "The Cedar-IBSi Mumbai Summit, where banking leaders convene to build the future-ready bank.",
+      "dateLabel": "27 November 2026",
+      "city": "Mumbai, India",
+      "venue": null,
+      "imageUrl": "https://cedaribsi.events/images/gallery/2026-12-IBSi-Mumbai/2026IBSi12Mumbai.png",
+      "featured": false,
+      "registrationEmail": null,
+      "startsOn": "2026-11-27"
+    },
+    {
+      "id": "2026-mumbai-ibsi-global-fintech-innovation-awards",
+      "title": "IBSi Global FinTech Innovation Awards",
+      "summary": "The annual IBSi Global FinTech Innovation Awards, held alongside the Mumbai summit.",
+      "dateLabel": "27 November 2026",
+      "city": "Mumbai, India",
+      "venue": null,
+      "imageUrl": "https://cedaribsi.events/images/banner/GFIA7-scaled.jpg",
+      "featured": false,
+      "registrationEmail": null,
+      "startsOn": "2026-11-27"
+    }
+  ],
+  "stats": [
+    {
+      "label": "In-person attendees",
+      "value": "3,000+"
+    },
+    {
+      "label": "Banks & institutions engaged",
+      "value": "500+"
+    },
+    {
+      "label": "Senior speakers in the series",
+      "value": "400+"
+    },
+    {
+      "label": "Start-up founders engaged",
+      "value": "100+"
+    },
+    {
+      "label": "Summits across 2026",
+      "value": "8"
+    },
+    {
+      "label": "Host cities worldwide",
+      "value": "7"
+    },
+    {
+      "label": "Industry awards programmes",
+      "value": "4"
+    }
+  ],
+  "about": {
+    "heading": "About Cedar-IBSi",
+    "body": [
+      "Cedar Management Consulting International and IBS Intelligence run a shared events platform dedicated to the future of banking technology. Both firms curate a global Events & Awards calendar built for senior banking leadership, with FinTech innovators joining as event partners."
+    ],
+    "points": [
+      "Thought-leadership summits across the UK, Middle East, and Asia",
+      "The flagship IBSi Awards programmes",
+      "Curated boardroom discussions and networking, by invitation"
+    ]
+  },
+  "series": [
+    {
+      "key": "summits",
+      "title": "Summits",
+      "body": "Global thought-leadership summits convening banks, FinTechs, and consulting leaders across the UK, the Middle East, and Asia.",
+      "items": []
+    },
+    {
+      "key": "awards",
+      "title": "Awards",
+      "body": "",
+      "items": [
+        "IBSi Digital Banking Awards",
+        "IBSi Middle East Banking Excellence Awards",
+        "IBSi Sales League Table",
+        "IBSi Global FinTech Innovation Awards"
+      ]
+    },
+    {
+      "key": "boardroom-conversations",
+      "title": "Boardroom Conversations",
+      "body": "Curated boardroom discussions and social gatherings - FinTech X AI Ideas on Ice, InsurTech Stack and more.",
+      "items": []
+    },
+    {
+      "key": "founder-happy-hour",
+      "title": "Founder Happy Hour",
+      "body": "Informal evening gatherings connecting founders and investors across the FinTech Lab and Cedar Hill Capital community.",
+      "items": []
+    }
+  ],
+  "videos": [
+    {
+      "id": "summits-2025-highlights",
+      "title": "Cedar-IBSi Summits - 2025 highlights",
+      "youtubeId": "G2Hm_84jU7I",
+      "thumbnailUrl": null,
+      "dateLabel": "2025"
+    },
+    {
+      "id": "summits-2024-highlights",
+      "title": "Cedar-IBSi Summits - 2024 highlights",
+      "youtubeId": "B-o52DpdTsU",
+      "thumbnailUrl": null,
+      "dateLabel": "2024"
+    },
+    {
+      "id": "summits-2023-highlights",
+      "title": "Cedar-IBSi Summits - 2023 highlights",
+      "youtubeId": "QH2ZFBDQTUE",
+      "thumbnailUrl": null,
+      "dateLabel": "2023"
+    }
+  ],
+  "insights": [
+    {
+      "id": "digital-islamic-banking",
+      "title": "Adding the Power of Digital to Islamic Banking",
+      "topic": "Digital Banking",
+      "summary": ""
+    },
+    {
+      "id": "modernizing-payments-oman",
+      "title": "Modernizing Payments in Oman - The Way Forward",
+      "topic": "Payments",
+      "summary": ""
+    },
+    {
+      "id": "nextgen-banking-gcc",
+      "title": "NextGen Banking: Transforming Customer Engagement in the GCC",
+      "topic": "GCC",
+      "summary": ""
+    }
+  ]
+}

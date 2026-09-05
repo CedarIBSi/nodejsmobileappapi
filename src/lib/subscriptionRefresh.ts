@@ -17,22 +17,54 @@ const refreshableStatuses = new Set([
   "billing_grace_period",
   "on_hold",
   "paused",
-  "pending"
+  "pending",
+  // Cancelled but not yet expired. Worth one more look when the period ends,
+  // because two very different things can have happened: it lapsed as
+  // expected, or the user resubscribed before expiry and the store reactivated
+  // the same purchase. Without this check a resubscriber silently loses access
+  // at the old expiry date. Self-terminating - the answer is either 'expired'
+  // or 'active', and 'expired' is not refreshable.
+  "canceled"
 ]);
 
 /**
- * Minimum gap between store lookups for one subscription.
+ * Gap between store lookups for one subscription, derived from its own billing
+ * period rather than fixed.
  *
- * A healthy subscription throttles itself - the refresh writes a new expiry, so
- * the staleness test stops matching. Account hold does not: Google extended it
- * to 60 days at I/O 2026, and throughout it `current_end` stays in the past
- * while the status stays refreshable. Since the app calls /status on every
- * screen focus, that would be one Play API call per navigation for two months.
+ * A throttle is needed because a healthy subscription self-limits (the refresh
+ * writes a new expiry, so the staleness test stops matching) but one in account
+ * hold does not: Google extended account hold to 60 days at I/O 2026, and
+ * throughout it `current_end` stays in the past while the status stays
+ * refreshable. The app calls /status on every screen focus, so a fixed floor is
+ * what stops that becoming one Play API call per navigation for two months.
+ *
+ * It has to scale with the period, though. Play compresses billing periods for
+ * license testers - a monthly subscription renews every five minutes - so an
+ * hour-long throttle would skip the refresh for eleven consecutive renewals and
+ * strand a tester with a lapsed entitlement on a subscription that is actually
+ * active. Half a period is frequent enough to catch a renewal promptly and
+ * still cheap: twice per period, whatever the period is.
  */
-const minSyncIntervalMs = 60 * 60 * 1000;
+const maxSyncIntervalMs = 60 * 60 * 1000;
+const minSyncIntervalMs = 60 * 1000;
+
+const syncIntervalMsFor = (start: Date | null, end: Date | null): number => {
+  if (!start || !end) {
+    return maxSyncIntervalMs;
+  }
+
+  const periodMs = end.getTime() - start.getTime();
+
+  if (!Number.isFinite(periodMs) || periodMs <= 0) {
+    return maxSyncIntervalMs;
+  }
+
+  return Math.min(maxSyncIntervalMs, Math.max(minSyncIntervalMs, periodMs / 2));
+};
 
 type StaleSubscriptionRow = {
   current_end: Date | null;
+  current_start: Date | null;
   id: string;
   last_store_sync_at: Date | null;
   local_plan_id: string;
@@ -61,8 +93,8 @@ type StaleSubscriptionRow = {
  */
 export async function refreshLapsedSubscription(userId: string): Promise<boolean> {
   const result = await query<StaleSubscriptionRow>(
-    `SELECT id, local_plan_id, provider, provider_subscription_id, status, current_end,
-            last_store_sync_at
+    `SELECT id, local_plan_id, provider, provider_subscription_id, status,
+            current_start, current_end, last_store_sync_at
        FROM subscriptions
       WHERE user_id = $1 AND provider IN ('google_play', 'apple')
       ORDER BY created_at DESC LIMIT 1`,
@@ -76,7 +108,8 @@ export async function refreshLapsedSubscription(userId: string): Promise<boolean
   if (row.current_end && row.current_end.getTime() > Date.now()) return false;
   if (
     row.last_store_sync_at &&
-    Date.now() - row.last_store_sync_at.getTime() < minSyncIntervalMs
+    Date.now() - row.last_store_sync_at.getTime() <
+      syncIntervalMsFor(row.current_start, row.current_end)
   ) {
     return false;
   }

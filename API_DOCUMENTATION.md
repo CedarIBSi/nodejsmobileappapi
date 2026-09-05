@@ -72,6 +72,7 @@ Available scripts:
 | `npm run seed:galaxy` | Load Galaxy page content |
 | `npm run seed:journal-about` | Load journal marketing content |
 | `npm run seed:awards` | Load awards content |
+| `npm run seed:events` | Load the Cedar-IBSi events programme from `seed-data/events.json` |
 
 The deployed process must start with the project configuration available at `.env`. Restart the process after changing `.env`; Firebase Admin and other clients are cached in memory.
 
@@ -478,11 +479,24 @@ Public Galaxy page content. Returns `503 GALAXY_NOT_SEEDED` until seeded.
 
 Public award programs.
 
+#### `GET /v1/events`
+
+The Cedar-IBSi events programme for the app's Events screen, as one payload:
+`intro`, `upcoming[]`, `stats[]`, `about`, `series[]`, `videos[]`, `insights[]`.
+
+`upcoming` lists only published events, featured first, and an event drops off
+the day after its `starts_on` date - nothing has to be unpublished by hand once
+a summit has run. Registration is an email address, not a link: the app never
+sends a reader to cedaribsi.events.
+
+Content is curated in `seed-data/events.json` (there is no CMS behind the events
+site to read) and loaded with `npm run seed:events`.
+
 #### `GET /v1/ads`
 
 Public active house advertisements.
 
-All three public content endpoints use a 300-second cache window.
+All four public content endpoints use a 300-second cache window.
 
 ### Push notifications
 

@@ -1,10 +1,24 @@
 import type { PoolClient } from "pg";
+import { HttpError } from "./errors.js";
 
 export type StoreProvider = "google_play" | "apple";
 
-// Statuses that keep the 'premium_news' entitlement granted. Anything else
-// (cancelled, expired, revoked, on_hold, paused) drops it.
-const activeStatuses = new Set(["active", "trialing", "in_grace_period"]);
+/**
+ * Statuses that keep the 'premium_news' entitlement granted.
+ *
+ * 'canceled' belongs here, which reads wrong at first glance. In the stores'
+ * model cancelling only switches auto-renew off: the subscription stays live
+ * until the period the user already paid for runs out. Dropping the
+ * entitlement on the cancellation notice would take access away the moment
+ * someone cancels on day two of a paid month - money taken, service withdrawn.
+ * Expiry needs no special case here because the entitlement carries ends_at =
+ * current_end and every read filters on it, so access lapses on its own.
+ *
+ * 'revoked' is deliberately absent: that is a refund or chargeback, where
+ * access is supposed to stop immediately. So are 'expired', 'on_hold' and
+ * 'paused', none of which are paid-up states.
+ */
+const activeStatuses = new Set(["active", "trialing", "in_grace_period", "canceled"]);
 
 export type ReconcileStoreSubscriptionInput = {
   cancelledAt: Date | null;
@@ -35,7 +49,7 @@ export async function reconcileStoreSubscription(
   client: PoolClient,
   input: ReconcileStoreSubscriptionInput
 ): Promise<string> {
-  const upserted = await client.query<{ id: string }>(
+  const upserted = await client.query<{ id: string; user_id: string }>(
     `INSERT INTO subscriptions
        (user_id, local_plan_id, status, provider, provider_subscription_id, environment,
         current_start, current_end, cancelled_at)
@@ -49,7 +63,7 @@ export async function reconcileStoreSubscription(
        current_end = COALESCE(EXCLUDED.current_end, subscriptions.current_end),
        cancelled_at = EXCLUDED.cancelled_at,
        updated_at = now()
-     RETURNING id`,
+     RETURNING id, user_id`,
     [
       input.userId,
       input.planId,
@@ -62,7 +76,27 @@ export async function reconcileStoreSubscription(
       input.cancelledAt
     ]
   );
-  const subscriptionId = upserted.rows[0]!.id;
+  const upsertedRow = upserted.rows[0]!;
+
+  // The conflict target is (provider, provider_subscription_id) alone, so a
+  // purchase token that already belongs to someone else lands on their row and
+  // `DO UPDATE` leaves its user_id untouched. Without this check the caller
+  // would then be handed that row - and the entitlement write below would
+  // attach their user_id to another account's subscription.
+  //
+  // Only POST /verify-purchase can reach this: the webhook and refresh paths
+  // both take userId from the row they just read. A purchase token is a bearer
+  // credential for exactly one account, so a mismatch is either a copied token
+  // or a bug, and neither should be reconciled.
+  if (upsertedRow.user_id !== input.userId) {
+    throw new HttpError(
+      409,
+      "This purchase is already linked to another account",
+      "PURCHASE_ALREADY_LINKED"
+    );
+  }
+
+  const subscriptionId = upsertedRow.id;
 
   if (activeStatuses.has(input.status)) {
     await client.query(

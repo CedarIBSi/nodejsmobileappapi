@@ -12,7 +12,8 @@
     "migrate": "tsx src/db/migrate.ts",
     "seed:galaxy": "tsx src/db/seed-galaxy.ts",
     "seed:journal-about": "tsx src/db/seed-journal-about.ts",
-    "seed:awards": "tsx src/db/seed-awards.ts"
+    "seed:awards": "tsx src/db/seed-awards.ts",
+    "seed:events": "tsx src/db/seed-events.ts"
   },
   "engines": {
     "node": ">=20"
