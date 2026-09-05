@@ -3,6 +3,7 @@ import { z } from "zod";
 import { query, transaction } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
+import { isStaffRole } from "../lib/entitlement.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { getGoogleSubscription } from "../services/googlePlay.js";
@@ -61,7 +62,38 @@ subscriptionRouter.get("/status", ...privateRoute, asyncHandler(async (req, res)
      WHERE s.user_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
     [req.appUser!.id]
   );
-  res.json({ subscription: result.rows[0] ?? null });
+
+  // Staff hold access through their role, not a purchase, so there is no
+  // subscription row to find and this endpoint used to answer "none" while
+  // every content gate let them through - an employee with working access being
+  // told they had none. Reported the same way /v1/entitlements/me reports staff
+  // access: as a record of the ordinary shape, so clients need no special case.
+  //
+  // `staff` is not a store status and no reconciliation path can produce it, so
+  // a client that does not recognise it falls through to its own default rather
+  // than misreading it as an active paid plan. Provider is null deliberately:
+  // the app keys "Manage subscription" off google_play/apple, and there is
+  // nothing for staff to manage in a store.
+  const subscription =
+    result.rows[0] ??
+    (isStaffRole(req.appUser!.role)
+      ? {
+          id: `staff:${req.appUser!.id}`,
+          provider: null,
+          status: "staff",
+          current_start: null,
+          current_end: null,
+          cancelled_at: null,
+          plan_id: null,
+          plan_code: null,
+          plan_name: null,
+          apple_product_id: null,
+          google_product_id: null,
+          has_active_entitlement: true
+        }
+      : null);
+
+  res.json({ subscription });
 }));
 
 // Purchases and cancellations both live in the stores: buying happens through
