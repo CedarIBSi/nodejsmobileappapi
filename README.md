@@ -9,7 +9,7 @@ For the current complete endpoint, environment, deployment, testing, and trouble
 - Node.js 20+
 - PostgreSQL 14+
 - Firebase project and service-account credentials
-- Razorpay account, plans, API keys, and webhook secret
+- Google Play Console and/or App Store Connect credentials for production subscriptions
 - HTTPS reverse proxy in production (for example, Nginx, Cloudflare, or a managed host)
 
 ## Local setup
@@ -31,16 +31,7 @@ curl http://localhost:3000/health
 
 ## Database and plans
 
-Migrations are SQL files in `migrations/` and are tracked in `schema_migrations`. Add a Razorpay plan to both Razorpay and the local database (amount is in the currency's smallest unit, such as paise):
-
-```sql
-INSERT INTO subscription_plans
-  (code, name, razorpay_plan_id, price_amount, currency, "interval", status)
-VALUES
-  ('premium_monthly', 'Premium Monthly', 'plan_REPLACE_ME', 49900, 'INR', 'monthly', 'active');
-```
-
-The backend returns the public Razorpay `key_id` for checkout. It never returns `key_secret`.
+Migrations are SQL files in `migrations/` and are tracked in `schema_migrations`. Run every migration in order with `npm run migrate`. Subscription plan rows hold the Google Play and Apple product identifiers used by the mobile stores; do not put store private keys in the database.
 
 ## Firebase authentication
 
@@ -234,21 +225,11 @@ credential until it expires. Application access logging is disabled for
 
 ## Subscription providers
 
-Plans and entitlements use a shared provider model for `apple`, `google_play`, and `razorpay`. The included monthly and yearly plans are initially `draft` until their store/Razorpay product IDs are configured. Base prices are ₹99 monthly and ₹400 yearly, plus 18% GST where applicable. Cancellation retains access through the already-paid period, and both products are recurring subscriptions with no free trial.
-
-## Razorpay webhook
-
-Configure Razorpay to send webhooks to:
-
-```text
-https://YOUR_API_HOST/v1/webhooks/razorpay
-```
-
-Subscribe to `subscription.activated`, `subscription.charged`, `subscription.cancelled`, `subscription.paused`, `subscription.resumed`, `subscription.completed`, and `payment.failed`. Set the same secret in Razorpay and `RAZORPAY_WEBHOOK_SECRET`. Signatures are checked against the untouched request body. Event IDs (or a body hash fallback) make delivery idempotent.
+Plans and entitlements use Google Play and Apple App Store subscriptions. The mobile application performs checkout through the relevant store; this API verifies purchase evidence with that store before granting or refreshing access. Store notification webhooks are authenticated and processed idempotently. Razorpay support has been removed.
 
 ## Example requests
 
-Replace `$TOKEN`, `$PLAN_ID`, and `$ARTICLE_ID` as appropriate.
+Replace `$TOKEN` and `$ARTICLE_ID` as appropriate.
 
 ```bash
 # Synchronize Firebase user
@@ -258,21 +239,9 @@ curl -X POST http://localhost:3000/v1/auth/sync-user \
 # Public plans
 curl http://localhost:3000/v1/subscription/plans
 
-# Create a Razorpay subscription
-curl -X POST http://localhost:3000/v1/subscription/create \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"plan_id":"'$PLAN_ID'"}'
-
 # Status and entitlements
 curl http://localhost:3000/v1/subscription/status -H "Authorization: Bearer $TOKEN"
 curl http://localhost:3000/v1/entitlements/me -H "Authorization: Bearer $TOKEN"
-
-# Cancel at the end of the current billing cycle
-curl -X POST http://localhost:3000/v1/subscription/cancel \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"cancel_at_cycle_end":true}'
 
 # Register an FCM token
 curl -X POST http://localhost:3000/v1/push-token \
@@ -306,7 +275,7 @@ curl -X DELETE "http://localhost:3000/v1/news/saved-articles/$ARTICLE_ID" \
 3. Run `npm ci`, `npm run build`, and `npm run migrate` during deployment.
 4. Start with `npm start` behind an HTTPS load balancer or reverse proxy.
 5. Set `CORS_ORIGINS` to allowed web origins. Native mobile requests generally have no browser origin.
-6. Configure health monitoring against `/health` and Razorpay webhook retries/alerts.
+6. Configure health monitoring against `/health` and alerts for failed Apple/Google store notifications.
 
 ## Scripts
 

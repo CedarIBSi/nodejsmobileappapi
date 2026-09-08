@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isIP } from "node:net";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { z } from "zod";
@@ -15,6 +16,10 @@ const defaultWordPressUserAgent =
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  // Bind to loopback by default so the API is reachable only through the
+  // reverse proxy. Azure App Service/Container Apps must explicitly set
+  // HOST=0.0.0.0 because their ingress connects over the container network.
+  HOST: z.string().refine((value) => isIP(value) === 4, "HOST must be an IPv4 address").default("127.0.0.1"),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
   DATABASE_SSL: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
