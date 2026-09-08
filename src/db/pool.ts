@@ -5,15 +5,25 @@ let instance: Pool | undefined;
 
 export function pool(): Pool {
   if (!instance) {
+    const env = config();
+    const useTls = env.DATABASE_SSL || env.PGSSLMODE !== "disable";
     instance = new Pool({
-      connectionString: config().DATABASE_URL,
+      ...(env.DATABASE_URL
+        ? { connectionString: env.DATABASE_URL }
+        : {
+            host: env.PGHOST,
+            port: env.PGPORT,
+            database: env.PGDATABASE,
+            user: env.PGUSER,
+            password: env.PGPASSWORD
+          }),
       max: 10,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
       // Azure PostgreSQL presents a publicly trusted certificate. Production
       // TLS must verify both the certificate chain and server hostname rather
       // than merely encrypting traffic without authenticating the server.
-      ssl: config().DATABASE_SSL ? { rejectUnauthorized: true } : undefined
+      ssl: useTls ? { rejectUnauthorized: true } : undefined
     });
   }
   return instance;

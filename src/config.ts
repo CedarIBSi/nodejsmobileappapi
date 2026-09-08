@@ -21,8 +21,14 @@ const schema = z.object({
   // HOST=0.0.0.0 because their ingress connects over the container network.
   HOST: z.string().refine((value) => isIP(value) === 4, "HOST must be an IPv4 address").default("127.0.0.1"),
   PORT: z.coerce.number().int().positive().default(3000),
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z.string().default(""),
   DATABASE_SSL: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  PGHOST: z.string().default(""),
+  PGPORT: z.coerce.number().int().positive().default(5432),
+  PGDATABASE: z.string().default(""),
+  PGUSER: z.string().default(""),
+  PGPASSWORD: z.string().default(""),
+  PGSSLMODE: z.enum(["disable", "require", "verify-ca", "verify-full"]).default("disable"),
   FIREBASE_PROJECT_ID: z.string().min(1),
   FIREBASE_AUTH_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/i).optional(),
   FIREBASE_CLIENT_EMAIL: z.string().email(),
@@ -96,6 +102,13 @@ const schema = z.object({
   // Rolling window of recent news exposed by /v1/news.
   NEWS_WINDOW_MONTHS: z.coerce.number().int().positive().default(6),
   NEWS_TOPIC_COUNT: z.coerce.number().int().positive().max(100).default(12)
+}).superRefine((value, context) => {
+  if (value.DATABASE_URL) return;
+  for (const name of ["PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD"] as const) {
+    if (!value[name]) {
+      context.addIssue({ code: "custom", path: [name], message: `${name} is required when DATABASE_URL is empty` });
+    }
+  }
 });
 
 export type Config = z.infer<typeof schema>;
