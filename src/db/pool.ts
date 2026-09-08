@@ -10,7 +10,10 @@ export function pool(): Pool {
       max: 10,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
-      ssl: config().DATABASE_SSL ? { rejectUnauthorized: false } : undefined
+      // Azure PostgreSQL presents a publicly trusted certificate. Production
+      // TLS must verify both the certificate chain and server hostname rather
+      // than merely encrypting traffic without authenticating the server.
+      ssl: config().DATABASE_SSL ? { rejectUnauthorized: true } : undefined
     });
   }
   return instance;
