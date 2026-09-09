@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { query, transaction } from "../db/pool.js";
+import { getArticleMetadata } from "./wordpress.js";
 
 const SEND_URL = "https://exp.host/--/api/v2/push/send";
 const RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
@@ -85,15 +86,27 @@ export async function sendPushNotificationToUser(
 
 export async function broadcastArticle(input: {
   articleId: string;
-  headline: string;
+  headline?: string;
   summary?: string;
   imageUrl?: string;
   requestedBy: string;
 }) {
+  const suppliedHeadline = input.headline?.trim();
+  const metadata = !suppliedHeadline || !input.imageUrl
+    ? await getArticleMetadata(input.articleId)
+    : null;
+  const headline = suppliedHeadline || metadata?.headline;
+  const imageUrl = input.imageUrl || metadata?.image_url || undefined;
+  if (!headline) {
+    const error = new Error("The article headline could not be resolved from WordPress");
+    Object.assign(error, { status: 422, code: "ARTICLE_METADATA_UNAVAILABLE" });
+    throw error;
+  }
+
   const created = await query<{ id: string }>(
     `INSERT INTO article_push_broadcasts (article_id, headline, summary, image_url, requested_by)
      VALUES ($1, $2, $3, $4, $5) ON CONFLICT (article_id) DO NOTHING RETURNING id`,
-    [input.articleId, input.headline, input.summary ?? null, input.imageUrl ?? null, input.requestedBy]
+    [input.articleId, headline, input.summary ?? null, imageUrl ?? null, input.requestedBy]
   );
   const broadcastId = created.rows[0]?.id;
   if (!broadcastId) {
@@ -111,9 +124,10 @@ export async function broadcastArticle(input: {
 
   const message = {
     title: "IBS Intelligence",
-    body: input.headline,
+    body: headline,
     sound: "default",
-    data: { type: "news_article", article_id: input.articleId, ...(input.imageUrl ? { image_url: input.imageUrl } : {}) }
+    ...(imageUrl ? { richContent: { image: imageUrl } } : {}),
+    data: { type: "news_article", article_id: input.articleId, ...(imageUrl ? { image_url: imageUrl } : {}) }
   };
 
   try {

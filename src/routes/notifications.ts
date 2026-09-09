@@ -35,7 +35,7 @@ notificationRouter.post("/send", ...privateRoute, validate(sendSchema), asyncHan
 
 const articleBroadcastSchema = z.object({
   article_id: z.string().min(1).max(255),
-  headline: z.string().min(1).max(200),
+  headline: z.string().min(1).max(200).optional(),
   summary: z.string().min(1).max(500).optional(),
   image_url: z.url().optional()
 });

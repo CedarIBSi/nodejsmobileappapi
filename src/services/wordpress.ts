@@ -391,6 +391,39 @@ export async function listNewsCategories(): Promise<NewsCategoryItem[]> {
 
 /** One article's body, as plain text ready for the app to render. */
 export type ArticleContent = { html: string | null; text: string | null };
+export type ArticleMetadata = {
+  headline: string;
+  image_url: string | null;
+};
+
+/**
+ * The mobile app prefixes WordPress IDs with `postid-`. WordPress itself only
+ * accepts the numeric portion in its REST path.
+ */
+function wordPressArticleId(articleId: string): string {
+  return articleId.replace(/^postid-/i, "");
+}
+
+/** Resolves notification copy and artwork from the canonical WordPress post. */
+export async function getArticleMetadata(articleId: string): Promise<ArticleMetadata | null> {
+  return cached(
+    `news:article-metadata:${articleId}`,
+    config().MEDIA_CACHE_TTL_SECONDS * 1000,
+    async () => {
+      const url = new URL(
+        `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
+        config().WORDPRESS_BASE_URL
+      );
+      url.searchParams.set("_embed", "wp:featuredmedia");
+      url.searchParams.set("_fields", "id,title,_links,_embedded");
+
+      const response = await wordPressRequest(url, "application/json");
+      const post = (await response.json()) as WordPressPost;
+      const headline = toText(post.title?.rendered);
+      return headline ? { headline, image_url: featuredImage(post) } : null;
+    }
+  );
+}
 
 /**
  * Both renderings of the body. `text` is what every shipped app build reads and
@@ -405,7 +438,7 @@ export async function getArticleContent(articleId: string): Promise<ArticleConte
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
       const url = new URL(
-        `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(articleId)}`,
+        `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
         config().WORDPRESS_BASE_URL
       );
       url.searchParams.set("_fields", "id,content");

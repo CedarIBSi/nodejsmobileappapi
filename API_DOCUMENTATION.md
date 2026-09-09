@@ -540,13 +540,15 @@ Broadcasts one editor-selected article to every registered device:
 ```json
 {
   "article_id": "12345",
-  "headline": "Selected IBS Intelligence news headline",
+  "headline": "Optional headline override",
   "summary": "Optional internal/audit summary",
   "image_url": "https://example.com/optional-article-image.jpg"
 }
 ```
 
-The visible title is always `IBS Intelligence` and the body is the headline.
+The visible title is always `IBS Intelligence`. The backend loads the real
+headline and featured image from WordPress; `headline` and `image_url` are
+optional overrides.
 The app receives `type: news_article`, `article_id`, and the optional
 `image_url`, so tapping the notification can open the exact article.
 
