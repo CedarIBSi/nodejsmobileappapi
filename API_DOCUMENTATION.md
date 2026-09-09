@@ -115,6 +115,14 @@ The configured project is currently `ibsi-fintech-news`. The Android application
 | `GOOGLE_PUBSUB_AUDIENCE` | Yes for RTDN | Expected OIDC audience for Pub/Sub pushes |
 | `GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL` | Recommended for RTDN | Restricts pushes to the expected Pub/Sub identity |
 
+### Expo push notifications
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `EXPO_ACCESS_TOKEN` | Recommended | EAS enhanced push-security token; store in Key Vault |
+| `EXPO_PUSH_BATCH_INTERVAL_MS` | No | Delay between 100-device batches; default `250` |
+| `EXPO_RECEIPT_DELAY_SECONDS` | No | Delay before checking delivery receipts; default `900` |
+
 ### Apple
 
 | Variable | Required for iOS purchases | Description |
@@ -512,7 +520,7 @@ All four public content endpoints use a 300-second cache window.
 
 Upserts ownership of the Expo token.
 
-#### `POST /v1/notifications/send` — Staff only
+#### `POST /v1/notifications/send` — Admin only
 
 ```json
 {
@@ -524,6 +532,35 @@ Upserts ownership of the Expo token.
 ```
 
 Sends to every registered Expo token belonging to the target user.
+
+#### `POST /v1/notifications/article` — Admin only
+
+Broadcasts one editor-selected article to every registered device:
+
+```json
+{
+  "article_id": "12345",
+  "headline": "Selected IBS Intelligence news headline",
+  "summary": "Optional internal/audit summary",
+  "image_url": "https://example.com/optional-article-image.jpg"
+}
+```
+
+The visible title is always `IBS Intelligence` and the body is the headline.
+The app receives `type: news_article`, `article_id`, and the optional
+`image_url`, so tapping the notification can open the exact article.
+
+The same article cannot be broadcast twice. Sends use batches of 100, remain
+below Expo's 600-notifications-per-second limit, retry temporary failures, and
+store Expo tickets for delayed receipt checking. Tokens reported as
+`DeviceNotRegistered` are removed automatically.
+
+#### `GET /v1/notifications/article/:broadcastId` — Admin only
+
+Returns the target, accepted, delivered and failed counts for a broadcast.
+
+The mobile app controls the IBSI notification icon. It must also handle a
+notification tap by navigating to the ID provided in `data.article_id`.
 
 ## 8. Roles and manual access
 

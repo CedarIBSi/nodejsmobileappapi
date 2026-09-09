@@ -49,6 +49,13 @@ const schema = z.object({
   // from Pub/Sub and not an unauthenticated caller.
   GOOGLE_PUBSUB_AUDIENCE: z.string().url().optional(),
   GOOGLE_PUBSUB_SERVICE_ACCOUNT_EMAIL: z.string().email().optional(),
+  // Optional enhanced security token from the EAS dashboard. When enabled in
+  // Expo, every send and receipt request must carry this bearer credential.
+  EXPO_ACCESS_TOKEN: z.string().min(1).optional(),
+  // 100 messages every 250ms is 400/second, safely below Expo's 600/second
+  // project limit while leaving headroom for one-off notifications.
+  EXPO_PUSH_BATCH_INTERVAL_MS: z.coerce.number().int().min(200).max(10_000).default(250),
+  EXPO_RECEIPT_DELAY_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
   APPLE_ISSUER_ID: z.string().min(1).optional(),
   APPLE_KEY_ID: z.string().min(1).optional(),
   APPLE_PRIVATE_KEY: z.string().min(1).optional(),

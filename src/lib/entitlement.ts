@@ -13,6 +13,11 @@ export function isStaffRole(role?: string | null): boolean {
   return staffRoles.includes(role as UserRole);
 }
 
+/** Administrative mutations such as a mass push must not be available to employees. */
+export function isAdminRole(role?: string | null): boolean {
+  return role === "admin" || role === "super_admin";
+}
+
 /**
  * True when the user currently holds premium access, either from a staff role or
  * an active entitlement. Mirrors the test used by the article meter.
