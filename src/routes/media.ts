@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
-import { hasActiveEntitlement } from "../lib/entitlement.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -16,21 +15,22 @@ function requestedPage(req: { query: unknown }) {
 }
 
 /**
- * Podcasts and videos are premium content. Metadata is public so the app can
- * render a locked preview, but playable media is withheld from callers without
- * an active entitlement. Client-side gating alone is not enforcement.
+ * Podcasts and videos are free. Both listings previously nulled the playable
+ * field - audio_url here, youtube_id below - for callers without an active
+ * entitlement; they now return it to everyone, signed in or not.
+ *
+ * resolveOptionalUser stays on the route. It never gates the response, but it
+ * keeps a signed-in caller identified for logging and rate limiting, and it is
+ * what a future per-user field would read.
  */
 podcastRouter.get(
   "/",
   ...listRoute,
   asyncHandler(async (req, res) => {
     const { page, limit } = requestedPage(req);
-    const entitled = req.appUser
-      ? await hasActiveEntitlement(req.appUser.id, req.appUser.role)
-      : false;
     const { items, total } = await listPodcasts(page, limit);
     res.json({
-      podcasts: items.map((item) => (entitled ? item : { ...item, audio_url: null })),
+      podcasts: items,
       pagination: pagination(page, limit, total)
     });
   })
@@ -41,12 +41,9 @@ videoRouter.get(
   ...listRoute,
   asyncHandler(async (req, res) => {
     const { page, limit } = requestedPage(req);
-    const entitled = req.appUser
-      ? await hasActiveEntitlement(req.appUser.id, req.appUser.role)
-      : false;
     const { items, total } = await listVideos(page, limit);
     res.json({
-      videos: items.map((item) => (entitled ? item : { ...item, youtube_id: null })),
+      videos: items,
       pagination: pagination(page, limit, total)
     });
   })

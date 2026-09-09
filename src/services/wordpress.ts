@@ -213,7 +213,9 @@ function toPodcast(post: WordPressPost): PodcastItem {
     episode_number: episodeNumber,
     id: post.id,
     image_url: featuredImage(post),
-    is_premium: true,
+    // Free since podcasts moved to the app's Insights tab. Kept in the payload
+    // so existing consumers do not break on a missing field; nothing reads it.
+    is_premium: false,
     link: post.link ?? "",
     published_at: toIsoTimestamp(post.date_gmt),
     title: toText(post.title?.rendered)
@@ -475,7 +477,8 @@ export async function listVideos(page: number, limit: number): Promise<MediaPage
       description: videoDescription(post),
       id: post.id,
       image_url: featuredImage(post),
-      is_premium: true,
+      // Free, as with podcasts above.
+      is_premium: false,
       link: post.link ?? "",
       published_at: toIsoTimestamp(post.date_gmt),
       title: toText(post.title?.rendered),

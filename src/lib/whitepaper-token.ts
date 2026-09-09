@@ -14,6 +14,15 @@ type WhitepaperTokenPayload = {
   expires_at: number;
 };
 
+/**
+ * Stamped into a token minted for a caller with no account. White papers are
+ * free, so this is the common case rather than an error - the field is kept
+ * because it is what the payload has always carried and it keeps a signed-in
+ * reader's links distinguishable in a log. It authorises nothing: the viewer
+ * verifies the signature and the expiry, and never reads this back.
+ */
+export const anonymousReaderId = "anonymous";
+
 function signature(payload: string): string {
   const secret = config().WHITEPAPER_SIGNING_SECRET;
   if (!secret) {

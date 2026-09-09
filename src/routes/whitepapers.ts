@@ -5,12 +5,15 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { query } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
-import { hasActiveEntitlement } from "../lib/entitlement.js";
 import { HttpError } from "../lib/errors.js";
 import { toSingleLine } from "../lib/html-text.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
-import { createWhitepaperToken, verifyWhitepaperToken } from "../lib/whitepaper-token.js";
-import { privateRoute } from "../middleware/auth.js";
+import {
+  anonymousReaderId,
+  createWhitepaperToken,
+  verifyWhitepaperToken
+} from "../lib/whitepaper-token.js";
+import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 
 export const whitepaperRouter = Router();
@@ -46,12 +49,6 @@ const listSchema = paginationSchema.extend({
 const whitepaperParams = z.object({ whitepaper_id: z.string().regex(/^[1-9]\d*$/) });
 const viewParams = z.object({ token: z.string().min(20).max(2048) });
 
-async function requireWhitepaperAccess(user: NonNullable<Express.Request["appUser"]>) {
-  if (!await hasActiveEntitlement(user.id, user.role)) {
-    throw new HttpError(402, "An active subscription is required", "SUBSCRIPTION_REQUIRED");
-  }
-}
-
 function whitepaperImageUrl(imagePath: string | null): string | null {
   const filename = imagePath?.trim();
   if (!filename || path.basename(filename) !== filename) return null;
@@ -81,8 +78,15 @@ function resolveWhitepaperPath(filename: string): string {
   return filePath;
 }
 
-whitepaperRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHandler(async (req, res) => {
-  await requireWhitepaperAccess(req.appUser!);
+/**
+ * White papers are free. The listing and the view-link mint used to sit behind
+ * privateRoute plus an entitlement check; both are gone, so a caller with no
+ * account reads the same library.
+ *
+ * resolveOptionalUser stays so a signed-in reader is still identified - it is
+ * what stamps the view token below - but nothing here requires it to resolve.
+ */
+whitepaperRouter.get("/", resolveOptionalUser, validate(listSchema, "query"), asyncHandler(async (req, res) => {
   const { page, limit, year, category, search } = req.query as unknown as {
     page: number; limit: number; year?: number; category?: string; search?: string;
   };
@@ -126,8 +130,7 @@ whitepaperRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncH
   });
 }));
 
-whitepaperRouter.post("/:whitepaper_id/view-link", ...privateRoute, validate(whitepaperParams, "params"), asyncHandler(async (req, res) => {
-  await requireWhitepaperAccess(req.appUser!);
+whitepaperRouter.post("/:whitepaper_id/view-link", resolveOptionalUser, validate(whitepaperParams, "params"), asyncHandler(async (req, res) => {
   const whitepaperId = req.params.whitepaper_id as string;
   const result = await query<{ sr_no: number }>(
     `SELECT sr_no FROM db_white_paper_data WHERE sr_no = $1 AND ${servableFilter}`,
@@ -135,7 +138,13 @@ whitepaperRouter.post("/:whitepaper_id/view-link", ...privateRoute, validate(whi
   );
   if (!result.rows[0]) throw new HttpError(404, "White paper not found", "WHITEPAPER_NOT_FOUND");
 
-  const { token, expiresAt } = createWhitepaperToken(whitepaperId, req.appUser!.id);
+  // Signed-out readers are legitimate callers now, so the token records who
+  // asked when that is known and a fixed placeholder when it is not. The id is
+  // carried for attribution only - nothing downstream authorises against it.
+  const { token, expiresAt } = createWhitepaperToken(
+    whitepaperId,
+    req.appUser?.id ?? anonymousReaderId
+  );
   res.set("Cache-Control", "no-store");
   res.json({
     view_url: new URL(`/v1/whitepapers/view/${token}`, config().APP_BASE_URL).toString(),
