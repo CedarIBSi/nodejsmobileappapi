@@ -6,6 +6,15 @@ export type StoreProvider = "google_play" | "apple";
 /**
  * Statuses that keep the 'premium_news' entitlement granted.
  *
+ * The two stores spell their states differently and both spellings have to
+ * appear here. Google says 'in_grace_period', Apple says 'billing_grace_period'
+ * (see GoogleSubscriptionState and AppleSubscriptionState). Both mean the same
+ * thing - the card failed and the store is still retrying - and in both the
+ * subscriber is still a paying customer the store expects to keep access.
+ * Apple's spelling was missing here, so every iOS subscriber whose payment
+ * hiccuped was locked out instantly while the account screen told them to
+ * update their payment method to keep the access they had already lost.
+ *
  * 'canceled' belongs here, which reads wrong at first glance. In the stores'
  * model cancelling only switches auto-renew off: the subscription stays live
  * until the period the user already paid for runs out. Dropping the
@@ -17,8 +26,37 @@ export type StoreProvider = "google_play" | "apple";
  * 'revoked' is deliberately absent: that is a refund or chargeback, where
  * access is supposed to stop immediately. So are 'expired', 'on_hold' and
  * 'paused', none of which are paid-up states.
+ *
+ * 'trialing' is not emitted by either store today - Play reports a trial as
+ * 'active'. It is kept because it can only ever grant, never deny.
  */
-const activeStatuses = new Set(["active", "trialing", "in_grace_period", "canceled"]);
+const activeStatuses = new Set([
+  "active",
+  "trialing",
+  "in_grace_period",
+  "billing_grace_period",
+  "canceled"
+]);
+
+/**
+ * States in which the store has finished with a subscription for good: it
+ * cannot bill again and cannot come back to life.
+ *
+ * Written as the terminal set rather than the live one on purpose. Callers that
+ * need "is this still going?" ask for the complement, so a status nobody
+ * anticipated - a new store enum, a typo, Google's 'unspecified' - counts as
+ * live. For the one caller that matters, account deletion, that is the safe
+ * direction: refusing to delete an account that turns out to have nothing
+ * running is a support ticket, while deleting one that is still being charged
+ * strands a paying customer with no account and no way to cancel.
+ *
+ * 'canceled' is absent: auto-renew is off but the paid period is still running.
+ */
+export const terminalStoreStatuses = [
+  "expired",
+  "revoked",
+  "pending_purchase_canceled"
+] as const;
 
 export type ReconcileStoreSubscriptionInput = {
   cancelledAt: Date | null;

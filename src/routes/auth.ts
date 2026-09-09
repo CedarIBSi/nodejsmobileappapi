@@ -6,6 +6,7 @@ import { HttpError } from "../lib/errors.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
+import { terminalStoreStatuses } from "../lib/subscriptionReconcile.js";
 import { firebaseAuth } from "../services/firebase.js";
 
 export const authRouter = Router();
@@ -49,16 +50,53 @@ authRouter.post("/logout-all", ...privateRoute, asyncHandler(async (req, res) =>
 }));
 
 authRouter.delete("/me", ...privateRoute, validate(deleteAccountSchema), asyncHandler(async (req, res) => {
-  const active = await query(
-    `SELECT 1 FROM subscriptions WHERE user_id = $1
-     AND status IN ('created', 'authenticated', 'active', 'pending', 'halted', 'paused', 'cancel_pending')
-     LIMIT 1`,
-    [req.appUser!.id]
+  /**
+   * Asked as "not finished" rather than "is one of these live states".
+   *
+   * The old list named the live ones, and it had drifted: it still carried the
+   * Razorpay statuses migration 012 removed, while missing every state the
+   * stores actually bill in except 'active' - Google's 'canceled' (auto-renew
+   * off, paid period still running) and 'in_grace_period', Apple's
+   * 'billing_grace_period' and 'billing_retry'. Anyone in those could delete
+   * their account and go on being charged for a subscription they no longer had
+   * any account to use or cancel from.
+   *
+   * Inverting it makes the failure safe. Terminal states are a small, stable
+   * set; anything unrecognised falls outside it and blocks the delete.
+   */
+  const unfinished = await query(
+    "SELECT 1 FROM subscriptions WHERE user_id = $1 AND status <> ALL($2::text[]) LIMIT 1",
+    [req.appUser!.id, terminalStoreStatuses]
   );
-  if (active.rowCount) {
+  if (unfinished.rowCount) {
     throw new HttpError(409, "Cancel the active subscription before deleting the account", "ACTIVE_SUBSCRIPTION");
   }
-  await firebaseAuth().deleteUser(req.firebaseUser!.uid);
+  /**
+   * Order matters, and this is the safe one. The row goes first, the Firebase
+   * user second.
+   *
+   * Deleting the Firebase user first destroys the only way back in: if the row
+   * delete then failed - a dropped connection, or a foreign key with no
+   * ON DELETE clause - the reader was left unable to sign in and still on file,
+   * with the app telling them to try again and no login to try it with. Only a
+   * manual database fix recovered them.
+   *
+   * This way round the failure is self-healing. The data is gone, which is what
+   * was asked for; a surviving Firebase user fails requireAppUser on its next
+   * call, the client re-syncs into a fresh empty row, and deleting again
+   * retries the half that did not happen.
+   */
   await query("DELETE FROM app_users WHERE id = $1", [req.appUser!.id]);
+
+  try {
+    await firebaseAuth().deleteUser(req.firebaseUser!.uid);
+  } catch (err) {
+    // Already gone is the state we wanted, not a failure to report.
+    if ((err as { code?: string }).code !== "auth/user-not-found") {
+      req.log.error({ err, userId: req.appUser!.id }, "Account row deleted but Firebase user remains");
+      throw err;
+    }
+  }
+
   res.status(204).send();
 }));
