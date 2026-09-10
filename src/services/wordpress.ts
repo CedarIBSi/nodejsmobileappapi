@@ -33,6 +33,20 @@ export type VideoItem = {
   youtube_id: string | null;
 };
 
+export type AnalystOpinionItem = {
+  excerpt: string | null;
+  id: number;
+  image_url: string | null;
+  link: string;
+  published_at: string | null;
+  title: string;
+};
+
+export type AnalystOpinionDetail = AnalystOpinionItem & {
+  body: string;
+  body_html: string | null;
+};
+
 export type MediaPage<T> = { items: T[]; total: number };
 
 type EmbeddedMedia = {
@@ -486,4 +500,72 @@ export async function listVideos(page: number, limit: number): Promise<MediaPage
     }));
     return { items, total };
   });
+}
+
+/**
+ * IBSi Views / Analyst Opinions are WordPress `articles` posts. They are free
+ * Insights content, so both the listing and complete article body are public.
+ */
+export async function listAnalystOpinions(
+  page: number,
+  limit: number
+): Promise<MediaPage<AnalystOpinionItem>> {
+  return cached(
+    `analyst-opinions:${page}:${limit}`,
+    config().MEDIA_CACHE_TTL_SECONDS * 1000,
+    async () => {
+      const { posts, total } = await fetchPostType("articles", page, limit, {
+        fields: "id,date_gmt,link,title,excerpt,_links,_embedded"
+      });
+      return {
+        items: posts.map((post) => ({
+          excerpt: toText(post.excerpt?.rendered) || null,
+          id: post.id,
+          image_url: featuredImage(post),
+          link: post.link ?? "",
+          published_at: toIsoTimestamp(post.date_gmt),
+          title: toText(post.title?.rendered)
+        })),
+        total
+      };
+    }
+  );
+}
+
+export async function getAnalystOpinion(
+  opinionId: string
+): Promise<AnalystOpinionDetail | null> {
+  const wordpressId = opinionId.replace(/^postid-/i, "");
+  return cached(
+    `analyst-opinion:${wordpressId}`,
+    config().MEDIA_CACHE_TTL_SECONDS * 1000,
+    async () => {
+      const url = new URL(
+        `/wp-json/wp/v2/articles/${encodeURIComponent(wordpressId)}`,
+        config().WORDPRESS_BASE_URL
+      );
+      url.searchParams.set("_embed", "wp:featuredmedia");
+      url.searchParams.set(
+        "_fields",
+        "id,date_gmt,link,title,excerpt,content,_links,_embedded"
+      );
+
+      const response = await wordPressRequest(url, "application/json");
+      const post = (await response.json()) as WordPressPost;
+      const bodyHtml = post.content?.rendered ?? null;
+      const body = htmlToPlainText(bodyHtml ?? "");
+      if (!post.id || !body) return null;
+
+      return {
+        body,
+        body_html: bodyHtml,
+        excerpt: toText(post.excerpt?.rendered) || null,
+        id: post.id,
+        image_url: featuredImage(post),
+        link: post.link ?? "",
+        published_at: toIsoTimestamp(post.date_gmt),
+        title: toText(post.title?.rendered)
+      };
+    }
+  );
 }

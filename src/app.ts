@@ -17,6 +17,7 @@ import { journalRouter } from "./routes/journals.js";
 import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
 import { notificationRouter } from "./routes/notifications.js";
+import { analystOpinionRouter } from "./routes/analyst-opinions.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { webhookRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/error-handler.js";
@@ -98,6 +99,7 @@ export function createApp() {
   app.use("/v1/whitepapers", whitepaperRouter);
   app.use("/v1/podcasts", podcastRouter);
   app.use("/v1/videos", videoRouter);
+  app.use("/v1/analyst-opinions", analystOpinionRouter);
   app.use(notFound);
   app.use(errorHandler);
   return app;

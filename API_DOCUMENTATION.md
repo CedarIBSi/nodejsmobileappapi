@@ -509,6 +509,22 @@ Public active house advertisements.
 
 All four public content endpoints use a 300-second cache window.
 
+### Analyst opinions
+
+Analyst Opinions (the WordPress **IBSi Views** article collection) are free
+Insights content. Neither endpoint requires sign-in or a subscription.
+
+#### `GET /v1/analyst-opinions?page=1&limit=20`
+
+Returns `analyst_opinions[]` with `id`, `title`, `excerpt`, `image_url`,
+`published_at`, and `link`, plus the standard pagination object.
+
+#### `GET /v1/analyst-opinions/:opinion_id`
+
+Returns the selected item as `analyst_opinion`, including the listing fields
+and its complete `body` (plain text) and `body_html` (rich content). Both a
+numeric WordPress ID and the app's `postid-123` form are accepted.
+
 ### Push notifications
 
 #### `POST /v1/push-token` — Private
