@@ -17,11 +17,27 @@ const deleteAccountSchema = z.object({ confirmation: z.literal("DELETE") });
 
 authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res) => {
   const token = req.firebaseUser!;
+
   const email = token.email?.trim().toLowerCase() || null;
 
-  // Google, Apple (including private relay) and verified email/password users
-  // all arrive with a Firebase-verified email claim. Never use an unverified
-  // claim to decide that two sign-in identities belong to the same person.
+  /**
+   * A profile is only built for an address Firebase has seen proven. Google and
+   * Apple (including private relay) verify on our behalf and arrive already
+   * verified; an email/password registration does not, and stays refused until
+   * the reader opens the link.
+   *
+   * This is a deliberate product decision rather than a technical necessity -
+   * the squat it guards against also needs two Firebase accounts on one email,
+   * which the project's one-account-per-email setting already prevents. It is
+   * kept because an account should be reachable at the address it claims, and
+   * because that setting is a console toggle away from not being true.
+   *
+   * The cost is real and lands entirely on the client: a reader is signed in to
+   * Firebase the instant they register, and has no profile here until they
+   * verify. The app owns that gap - see the verification screen it puts up on
+   * this exact response - and /v1/auth/me answers USER_NOT_SYNCED throughout,
+   * which is what the gap looks like after an app restart.
+   */
   if (email && token.email_verified !== true) {
     throw new HttpError(403, "Verify your email before creating an account", "EMAIL_NOT_VERIFIED");
   }
@@ -54,7 +70,9 @@ authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res)
       `INSERT INTO app_users (firebase_uid, email, display_name, phone)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (firebase_uid) DO UPDATE SET
-         email = EXCLUDED.email,
+         -- COALESCE so a token that arrives without an email claim cannot
+         -- erase an address the row already holds.
+         email = COALESCE(EXCLUDED.email, app_users.email),
          display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
          phone = COALESCE(EXCLUDED.phone, app_users.phone),
          updated_at = now()
@@ -87,7 +105,29 @@ authRouter.post("/logout-all", ...privateRoute, asyncHandler(async (req, res) =>
   res.status(204).send();
 }));
 
-authRouter.delete("/me", ...privateRoute, validate(deleteAccountSchema), asyncHandler(async (req, res) => {
+authRouter.delete("/me", verifyFirebaseToken, validate(deleteAccountSchema), asyncHandler(async (req, res) => {
+  /**
+   * verifyFirebaseToken alone, not privateRoute, and the profile row is looked
+   * up rather than required.
+   *
+   * privateRoute ends in requireAppUser, which 404s when no row exists - and no
+   * row exists for anyone who registered and has not verified, because
+   * sync-user above refuses to build one for an unverified address. The two
+   * guards contradicted each other: one stopped the row being created, the
+   * other demanded it before allowing a delete. The result was a Firebase
+   * account that could be created and never removed, which is exactly what
+   * Google Play requires an app not to do.
+   *
+   * A caller with no row still has a Firebase user to delete, and that is the
+   * part that matters to them.
+   */
+  const token = req.firebaseUser!;
+  const existing = await query<{ id: string }>(
+    "SELECT id FROM app_users WHERE firebase_uid = $1",
+    [token.uid]
+  );
+  const appUserId = existing.rows[0]?.id ?? null;
+
   /**
    * Asked as "can the store still charge for this" rather than "is the status
    * one of these".
@@ -118,17 +158,20 @@ authRouter.delete("/me", ...privateRoute, validate(deleteAccountSchema), asyncHa
    * there is nothing they can do about it: the screen tells them they have no
    * subscription while the guard keeps finding one.
    */
-  const billable = await query(
-    `SELECT 1 FROM subscriptions
-      WHERE user_id = $1
-        AND status <> ALL($2::text[])
-        AND (current_end IS NULL OR current_end > now() OR status = ANY($3::text[]))
-      LIMIT 1`,
-    [req.appUser!.id, nonBillableStoreStatuses, billableAfterPeriodEndStatuses]
-  );
-  if (billable.rowCount) {
-    throw new HttpError(409, "Cancel the active subscription before deleting the account", "ACTIVE_SUBSCRIPTION");
+  if (appUserId) {
+    const billable = await query(
+      `SELECT 1 FROM subscriptions
+        WHERE user_id = $1
+          AND status <> ALL($2::text[])
+          AND (current_end IS NULL OR current_end > now() OR status = ANY($3::text[]))
+        LIMIT 1`,
+      [appUserId, nonBillableStoreStatuses, billableAfterPeriodEndStatuses]
+    );
+    if (billable.rowCount) {
+      throw new HttpError(409, "Cancel the active subscription before deleting the account", "ACTIVE_SUBSCRIPTION");
+    }
   }
+
   /**
    * Order matters, and this is the safe one. The row goes first, the Firebase
    * user second.
@@ -144,14 +187,16 @@ authRouter.delete("/me", ...privateRoute, validate(deleteAccountSchema), asyncHa
    * call, the client re-syncs into a fresh empty row, and deleting again
    * retries the half that did not happen.
    */
-  await query("DELETE FROM app_users WHERE id = $1", [req.appUser!.id]);
+  if (appUserId) {
+    await query("DELETE FROM app_users WHERE id = $1", [appUserId]);
+  }
 
   try {
-    await firebaseAuth().deleteUser(req.firebaseUser!.uid);
+    await firebaseAuth().deleteUser(token.uid);
   } catch (err) {
     // Already gone is the state we wanted, not a failure to report.
     if ((err as { code?: string }).code !== "auth/user-not-found") {
-      req.log.error({ err, userId: req.appUser!.id }, "Account row deleted but Firebase user remains");
+      req.log.error({ err, uid: token.uid }, "Account row deleted but Firebase user remains");
       throw err;
     }
   }
