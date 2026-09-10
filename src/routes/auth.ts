@@ -21,26 +21,28 @@ authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res)
   const email = token.email?.trim().toLowerCase() || null;
 
   /**
-   * A profile is only built for an address Firebase has seen proven. Google and
-   * Apple (including private relay) verify on our behalf and arrive already
-   * verified; an email/password registration does not, and stays refused until
-   * the reader opens the link.
+   * Verification is recorded, not required.
    *
-   * This is a deliberate product decision rather than a technical necessity -
-   * the squat it guards against also needs two Firebase accounts on one email,
-   * which the project's one-account-per-email setting already prevents. It is
-   * kept because an account should be reachable at the address it claims, and
-   * because that setting is a console toggle away from not being true.
+   * This used to refuse an unverified address outright, and the refusal was the
+   * wrong shape: it gated whether an account could *exist* here, when what the
+   * product wants gated is what an account can *do*. Everything downstream had
+   * to cope with a person who was signed in to Firebase and absent from this
+   * database - the profile read 404ed, no entitlement could attach to them, the
+   * delete route refused them until it was fixed, and asking "does this email
+   * have an account" answered no while they sat looking at the one they had
+   * just created.
    *
-   * The cost is real and lands entirely on the client: a reader is signed in to
-   * Firebase the instant they register, and has no profile here until they
-   * verify. The app owns that gap - see the verification screen it puts up on
-   * this exact response - and /v1/auth/me answers USER_NOT_SYNCED throughout,
-   * which is what the gap looks like after an app restart.
+   * The row is written either way and carries the answer instead. Access stays
+   * gated on it - the client shows its verification screen off this flag rather
+   * than off a 403 - so the requirement survives while the contradiction does
+   * not.
    */
-  if (email && token.email_verified !== true) {
-    throw new HttpError(403, "Verify your email before creating an account", "EMAIL_NOT_VERIFIED");
-  }
+  const emailVerified = token.email_verified === true;
+  // 'password', 'google.com', and so on. How they last got in, not the full set
+  // of providers on the account - only firebase-admin can give that - but a
+  // sound proxy while one email means one account, because a reader who signed
+  // up with Google has no password to sign in with and never overwrites it.
+  const signInProvider = token.firebase?.sign_in_provider ?? null;
 
   const user = await transaction(async (client) => {
     if (email) {
@@ -67,17 +69,25 @@ authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res)
     }
 
     const result = await client.query(
-      `INSERT INTO app_users (firebase_uid, email, display_name, phone)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO app_users
+         (firebase_uid, email, display_name, phone, email_verified, sign_in_provider)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (firebase_uid) DO UPDATE SET
          -- COALESCE so a token that arrives without an email claim cannot
          -- erase an address the row already holds.
          email = COALESCE(EXCLUDED.email, app_users.email),
          display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
          phone = COALESCE(EXCLUDED.phone, app_users.phone),
+         -- Verification only ever moves forwards. A token minted before the
+         -- reader opened the link still says false, and arriving late must not
+         -- un-verify an address Firebase has already accepted.
+         email_verified = app_users.email_verified OR EXCLUDED.email_verified,
+         sign_in_provider = COALESCE(EXCLUDED.sign_in_provider, app_users.sign_in_provider),
          updated_at = now()
-       RETURNING id, firebase_uid, email, display_name, phone, role, created_at, updated_at`,
-      [token.uid, email, token.name ?? null, token.phone_number ?? null]
+       RETURNING id, firebase_uid, email, display_name, phone, role,
+                 email_verified, sign_in_provider, created_at, updated_at`,
+      [token.uid, email, token.name ?? null, token.phone_number ?? null,
+       emailVerified, signInProvider]
     );
     return result.rows[0];
   });
@@ -86,7 +96,8 @@ authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res)
 
 authRouter.get("/me", ...privateRoute, asyncHandler(async (req, res) => {
   const result = await query(
-    `SELECT id, firebase_uid, email, display_name, phone, role, created_at, updated_at
+    `SELECT id, firebase_uid, email, display_name, phone, role,
+            email_verified, sign_in_provider, created_at, updated_at
      FROM app_users WHERE id = $1`,
     [req.appUser!.id]
   );
