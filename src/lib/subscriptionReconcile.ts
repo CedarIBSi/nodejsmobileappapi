@@ -39,23 +39,28 @@ const activeStatuses = new Set([
 ]);
 
 /**
- * States in which the store has finished with a subscription for good: it
- * cannot bill again and cannot come back to life.
+ * States from which the store will never take money again.
  *
- * Written as the terminal set rather than the live one on purpose. Callers that
- * need "is this still going?" ask for the complement, so a status nobody
- * anticipated - a new store enum, a typo, Google's 'unspecified' - counts as
- * live. For the one caller that matters, account deletion, that is the safe
- * direction: refusing to delete an account that turns out to have nothing
- * running is a support ticket, while deleting one that is still being charged
- * strands a paying customer with no account and no way to cancel.
+ * The question is about billing, not about access, and the two part company at
+ * 'canceled'. A cancelled subscription still grants access - that is why it
+ * appears in activeStatuses above - but auto-renew is off and no further charge
+ * will ever be raised. An earlier version of this list reasoned about the paid
+ * period instead and left 'canceled' out, which meant a reader who cancelled in
+ * the store, exactly as the app told them to, came back and was refused again
+ * with the same message. There was nothing further they could do.
  *
- * 'canceled' is absent: auto-renew is off but the paid period is still running.
+ * Written as the negative set on purpose. Callers ask for the complement, so a
+ * status nobody anticipated - a new store enum, a typo, Google's 'unspecified' -
+ * counts as still billable. For account deletion that is the safe direction:
+ * refusing to delete an account that had nothing running is a support ticket,
+ * while deleting one that is still being charged strands a paying customer with
+ * no account and no way to cancel.
  */
-export const terminalStoreStatuses = [
+export const nonBillableStoreStatuses = [
+  "canceled",
   "expired",
-  "revoked",
-  "pending_purchase_canceled"
+  "pending_purchase_canceled",
+  "revoked"
 ] as const;
 
 export type ReconcileStoreSubscriptionInput = {

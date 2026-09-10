@@ -6,7 +6,7 @@ import { HttpError } from "../lib/errors.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { terminalStoreStatuses } from "../lib/subscriptionReconcile.js";
+import { nonBillableStoreStatuses } from "../lib/subscriptionReconcile.js";
 import { firebaseAuth } from "../services/firebase.js";
 
 export const authRouter = Router();
@@ -51,24 +51,30 @@ authRouter.post("/logout-all", ...privateRoute, asyncHandler(async (req, res) =>
 
 authRouter.delete("/me", ...privateRoute, validate(deleteAccountSchema), asyncHandler(async (req, res) => {
   /**
-   * Asked as "not finished" rather than "is one of these live states".
+   * Asked as "can the store still charge for this" rather than "is the status
+   * one of these".
    *
-   * The old list named the live ones, and it had drifted: it still carried the
-   * Razorpay statuses migration 012 removed, while missing every state the
-   * stores actually bill in except 'active' - Google's 'canceled' (auto-renew
-   * off, paid period still running) and 'in_grace_period', Apple's
-   * 'billing_grace_period' and 'billing_retry'. Anyone in those could delete
-   * their account and go on being charged for a subscription they no longer had
-   * any account to use or cancel from.
+   * The old list named the billing states directly and had drifted: it still
+   * carried the Razorpay statuses migration 012 removed, while missing every
+   * state the stores actually bill in except 'active' - Google's
+   * 'in_grace_period' and 'on_hold', Apple's 'billing_grace_period' and
+   * 'billing_retry'. Anyone in those could delete their account and go on being
+   * charged for a subscription they no longer had any account to cancel from.
    *
-   * Inverting it makes the failure safe. Terminal states are a small, stable
-   * set; anything unrecognised falls outside it and blocks the delete.
+   * Inverting it makes the failure safe: the non-billable states are a small,
+   * stable set, and anything unrecognised falls outside it and blocks.
+   *
+   * The test is whether the store can still charge, not whether access is still
+   * running. Those differ at 'canceled', which grants access to the end of the
+   * paid period but will never bill again - so it must not block, or cancelling
+   * as instructed leaves the reader refused a second time with nothing left to
+   * try.
    */
-  const unfinished = await query(
+  const billable = await query(
     "SELECT 1 FROM subscriptions WHERE user_id = $1 AND status <> ALL($2::text[]) LIMIT 1",
-    [req.appUser!.id, terminalStoreStatuses]
+    [req.appUser!.id, nonBillableStoreStatuses]
   );
-  if (unfinished.rowCount) {
+  if (billable.rowCount) {
     throw new HttpError(409, "Cancel the active subscription before deleting the account", "ACTIVE_SUBSCRIPTION");
   }
   /**
