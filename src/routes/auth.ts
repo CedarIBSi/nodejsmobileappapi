@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { query } from "../db/pool.js";
+import { query, transaction } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
@@ -17,18 +17,53 @@ const deleteAccountSchema = z.object({ confirmation: z.literal("DELETE") });
 
 authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res) => {
   const token = req.firebaseUser!;
-  const result = await query(
-    `INSERT INTO app_users (firebase_uid, email, display_name, phone)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (firebase_uid) DO UPDATE SET
-       email = EXCLUDED.email,
-       display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
-       phone = COALESCE(EXCLUDED.phone, app_users.phone),
-       updated_at = now()
-     RETURNING id, firebase_uid, email, display_name, phone, role, created_at, updated_at`,
-    [token.uid, token.email ?? null, token.name ?? null, token.phone_number ?? null]
-  );
-  res.json({ user: result.rows[0] });
+  const email = token.email?.trim().toLowerCase() || null;
+
+  // Google, Apple (including private relay) and verified email/password users
+  // all arrive with a Firebase-verified email claim. Never use an unverified
+  // claim to decide that two sign-in identities belong to the same person.
+  if (email && token.email_verified !== true) {
+    throw new HttpError(403, "Verify your email before creating an account", "EMAIL_NOT_VERIFIED");
+  }
+
+  const user = await transaction(async (client) => {
+    if (email) {
+      // The unique index is the final guard; this lock also makes the conflict
+      // deterministic when two first-time sign-ins for one email race.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`app-user-email:${email}`]
+      );
+
+      const owner = await client.query<{ firebase_uid: string }>(
+        `SELECT firebase_uid FROM app_users
+          WHERE lower(btrim(email)) = $1 AND firebase_uid <> $2
+          LIMIT 1`,
+        [email, token.uid]
+      );
+      if (owner.rowCount) {
+        throw new HttpError(
+          409,
+          "This email is associated with another sign-in method. Sign in with the original method and link the new provider.",
+          "EMAIL_ALREADY_LINKED"
+        );
+      }
+    }
+
+    const result = await client.query(
+      `INSERT INTO app_users (firebase_uid, email, display_name, phone)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (firebase_uid) DO UPDATE SET
+         email = EXCLUDED.email,
+         display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
+         phone = COALESCE(EXCLUDED.phone, app_users.phone),
+         updated_at = now()
+       RETURNING id, firebase_uid, email, display_name, phone, role, created_at, updated_at`,
+      [token.uid, email, token.name ?? null, token.phone_number ?? null]
+    );
+    return result.rows[0];
+  });
+  res.json({ user });
 }));
 
 authRouter.get("/me", ...privateRoute, asyncHandler(async (req, res) => {

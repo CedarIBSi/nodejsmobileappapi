@@ -179,6 +179,9 @@ Authentication sequence:
 2. It calls Firebase `getIdToken()`.
 3. It calls `POST /v1/auth/sync-user` with that bearer token.
 4. The backend verifies the token, including revocation status, and creates or updates `app_users`.
+   A verified normalized email can belong to only one Firebase UID. A second
+   UID receives `409 EMAIL_ALREADY_LINKED`; providers must be linked through
+   Firebase rather than silently transferring the API account.
 5. The same bearer token is used for private endpoints.
 
 Because revocation checking contacts Firebase, the server clock must be synchronized. Windows Time should be running and automatic:
