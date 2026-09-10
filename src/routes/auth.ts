@@ -6,7 +6,10 @@ import { HttpError } from "../lib/errors.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { nonBillableStoreStatuses } from "../lib/subscriptionReconcile.js";
+import {
+  billableAfterPeriodEndStatuses,
+  nonBillableStoreStatuses
+} from "../lib/subscriptionReconcile.js";
 import { firebaseAuth } from "../services/firebase.js";
 
 export const authRouter = Router();
@@ -69,10 +72,24 @@ authRouter.delete("/me", ...privateRoute, validate(deleteAccountSchema), asyncHa
    * paid period but will never bill again - so it must not block, or cancelling
    * as instructed leaves the reader refused a second time with nothing left to
    * try.
+   *
+   * Status alone is not enough, because a row's status is only as fresh as the
+   * last webhook that mentioned it and nothing re-asks about older rows. An
+   * expiry already in the past means the store has finished with that purchase
+   * whatever the row still says, so those are ignored - except for the statuses
+   * that legitimately outlive their period (see
+   * billableAfterPeriodEndStatuses). Without that clause a tester with a few
+   * abandoned purchases frozen at 'active' can never delete their account, and
+   * there is nothing they can do about it: the screen tells them they have no
+   * subscription while the guard keeps finding one.
    */
   const billable = await query(
-    "SELECT 1 FROM subscriptions WHERE user_id = $1 AND status <> ALL($2::text[]) LIMIT 1",
-    [req.appUser!.id, nonBillableStoreStatuses]
+    `SELECT 1 FROM subscriptions
+      WHERE user_id = $1
+        AND status <> ALL($2::text[])
+        AND (current_end IS NULL OR current_end > now() OR status = ANY($3::text[]))
+      LIMIT 1`,
+    [req.appUser!.id, nonBillableStoreStatuses, billableAfterPeriodEndStatuses]
   );
   if (billable.rowCount) {
     throw new HttpError(409, "Cancel the active subscription before deleting the account", "ACTIVE_SUBSCRIPTION");

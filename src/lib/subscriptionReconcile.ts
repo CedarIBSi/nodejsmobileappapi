@@ -63,6 +63,35 @@ export const nonBillableStoreStatuses = [
   "revoked"
 ] as const;
 
+/**
+ * Billable statuses that keep their claim on a reader after `current_end` has
+ * passed, because the store can still restart the charging it paused.
+ *
+ * Everything else billable is only billable while its paid period is running.
+ * That distinction matters because a subscription row is not self-healing:
+ * refreshLapsedSubscription re-asks the store about the newest row only, so a
+ * purchase that lapsed without its final webhook keeps whatever status it last
+ * had, forever. A tester's account accumulates a row per purchase and several
+ * end up frozen at 'active' with an expiry days in the past - live-looking rows
+ * for subscriptions Play finished with long ago.
+ *
+ * Reading those as billable is what made account deletion impossible: the
+ * account screen shows the newest row and says there is nothing to cancel,
+ * while a guard that scans every row keeps finding one. No cancellation can
+ * clear a row the store will never mention again.
+ *
+ * Grace/retry, 'on_hold' and 'paused' genuinely outlive their period: the
+ * stores can still retry or resume billing after the last paid expiry, so they
+ * are named here and go on blocking.
+ */
+export const billableAfterPeriodEndStatuses = [
+  "billing_grace_period",
+  "billing_retry",
+  "in_grace_period",
+  "on_hold",
+  "paused"
+] as const;
+
 export type ReconcileStoreSubscriptionInput = {
   cancelledAt: Date | null;
   currentEnd: Date | null;
