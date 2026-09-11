@@ -18,6 +18,7 @@ import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
 import { notificationRouter } from "./routes/notifications.js";
 import { analystOpinionRouter } from "./routes/analyst-opinions.js";
+import { authActionRouter } from "./routes/auth-action.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { webhookRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/error-handler.js";
@@ -30,12 +31,13 @@ export function createApp() {
   app.use(pinoHttp({
     level: env.LOG_LEVEL,
     redact: ["req.headers.authorization"],
-    // Journal and white paper view URLs contain a temporary bearer credential
-    // in the path. Avoid writing it to application access logs.
+    // Journal/white-paper view URLs and Firebase action URLs contain temporary
+    // bearer credentials. Avoid writing those credentials to access logs.
     autoLogging: {
       ignore: (req) =>
         (req.url?.startsWith("/v1/journals/view/") ||
-          req.url?.startsWith("/v1/whitepapers/view/")) ?? false
+          req.url?.startsWith("/v1/whitepapers/view/") ||
+          req.url?.startsWith("/auth/action")) ?? false
     }
   }));
   app.use(helmet());
@@ -84,6 +86,14 @@ export function createApp() {
     const appUrl = `${env.MOBILE_APP_SCHEME}://app-auth?link=${encodeURIComponent(fullLink)}`;
     res.redirect(302, appUrl);
   });
+  /**
+   * Firebase's email action handler, replaced so that nothing redeems a
+   * one-time code except the reader it was sent to.
+   * Not under /v1 - it is a browser destination reached from an email, not part
+   * of the app's API surface, and its URL is configured in the Firebase console
+   * rather than called by any client.
+   */
+  app.use("/auth/action", authActionRouter);
   app.use("/health", healthRouter);
   app.use("/v1/auth", authRouter);
   app.use("/v1/subscription", subscriptionRouter);
