@@ -14,6 +14,13 @@ dotenv.config({
 const defaultWordPressUserAgent =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
+// Windows paths suit local development and the original Windows server. The
+// Azure App Service runs Linux and sets both to directories on the mounted
+// blob container instead - see the README. A default that cannot exist on the
+// deployment target is why every PDF 404'd there until 2026-09-12.
+const defaultJournalStorageDir = "C:\\ibsi-pdfs\\ibs-journal";
+const defaultWhitepaperStorageDir = "C:\\ibsi-pdfs\\ibs-whitepaper";
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   // Bind to loopback by default so the API is reachable only through the
@@ -34,6 +41,16 @@ const schema = z.object({
   FIREBASE_CLIENT_EMAIL: z.string().email(),
   FIREBASE_PRIVATE_KEY: z.string().min(1),
   FIREBASE_SERVICE_ACCOUNT_FILE: z.string().default(""),
+  // Application (client) ID of the Azure app registration behind "Continue with
+  // Microsoft". Required to verify the ID tokens the app sends to
+  // /v1/auth/microsoft, and checked against every token's `aud` claim - a
+  // signature only proves Microsoft issued the token, so without this a token
+  // minted for any other application would be accepted here.
+  //
+  // Optional at startup, like the store credentials above: the route fails
+  // closed with a 503 rather than stopping the whole API from booting while the
+  // Azure side is still being set up.
+  MICROSOFT_CLIENT_ID: z.string().trim().default(""),
   // Google Play Billing and Apple In-App Purchase verification. Optional at
   // startup, same as the journal/whitepaper signing secrets - the console
   // setup (service account, App Store Connect API key) happens on its own
@@ -86,7 +103,14 @@ const schema = z.object({
   WORDPRESS_BYPASS_VALUE: z.string().default(""),
   WORDPRESS_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   MEDIA_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(900),
-  JOURNAL_STORAGE_DIR: z.string().min(1).default("C:\\ibsi-pdfs\\ibs-journal"),
+  // Trimmed: this is typed by hand into an Azure App Service setting, where a
+  // trailing space is invisible and resolves to a directory that does not
+  // exist. An all-whitespace value falls back rather than resolving to cwd.
+  JOURNAL_STORAGE_DIR: z
+    .string()
+    .min(1)
+    .default(defaultJournalStorageDir)
+    .transform((value) => value.trim() || defaultJournalStorageDir),
   JOURNAL_IMAGE_BASE_URL: z.string().url().default(
     "https://galaxy.ibsintelligence.com/vision-solution-images/img/journal-img/"
   ),
@@ -97,7 +121,12 @@ const schema = z.object({
   // One flat directory for every white paper, whatever its category - the
   // website splits them into per-category folders, but nothing here needs to,
   // and a flat root keeps `category` away from the filesystem entirely.
-  WHITEPAPER_STORAGE_DIR: z.string().min(1).default("C:\\ibsi-pdfs\\ibs-whitepaper"),
+  // Trimmed for the same reason as JOURNAL_STORAGE_DIR above.
+  WHITEPAPER_STORAGE_DIR: z
+    .string()
+    .min(1)
+    .default(defaultWhitepaperStorageDir)
+    .transform((value) => value.trim() || defaultWhitepaperStorageDir),
   WHITEPAPER_IMAGE_BASE_URL: z.string().url().default(
     "https://galaxy.ibsintelligence.com/vision-solution-images/img/whitepaper-img/"
   ),

@@ -1,4 +1,6 @@
 import { Router } from "express";
+import crypto from "node:crypto";
+import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { query, transaction } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
@@ -11,9 +13,197 @@ import {
   nonBillableStoreStatuses
 } from "../lib/subscriptionReconcile.js";
 import { firebaseAuth } from "../services/firebase.js";
+import { verifyMicrosoftIdToken } from "../services/microsoftIdentity.js";
+import { config } from "../config.js";
 
 export const authRouter = Router();
 const deleteAccountSchema = z.object({ confirmation: z.literal("DELETE") });
+const microsoftSignInSchema = z.object({ idToken: z.string().min(1) });
+const microsoftSignInLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false
+});
+
+const microsoftIdentityKey = (tenantId: string, objectId: string) =>
+  `microsoft:${tenantId}:${objectId}`;
+
+const microsoftFirebaseUid = (tenantId: string, objectId: string) =>
+  `ms-${crypto.createHash("sha256").update(microsoftIdentityKey(tenantId, objectId)).digest("base64url")}`;
+
+/**
+ * Trades a verified Microsoft ID token for a Firebase custom token.
+ *
+ * Unauthenticated by necessity - proving who the caller is is the entire job -
+ * so the Microsoft token is the only credential, and `verifyMicrosoftIdToken`
+ * is the only thing standing between an anonymous request and a signed-in
+ * session. Everything it checks matters; see that file.
+ *
+ * This route exists because Firebase Auth cannot be handed a Microsoft
+ * credential by a client at all. `signInWithCredential` rejects
+ * `microsoft.com` on the provider id before it looks at the token, and the only
+ * flows Firebase supports for Microsoft run through its hosted handler, which
+ * the React Native SDK does not implement and whose `continueUri` cannot be a
+ * custom scheme. A custom token is the documented way to establish a session
+ * the app can then use exactly like any other.
+ *
+ * Microsoft identities are keyed by their immutable tenant + object IDs. Email
+ * is profile data only: Microsoft explicitly says it is mutable and unsuitable
+ * for authorization. A matching email therefore never grants access to an
+ * existing IBSi account; that requires the authenticated /microsoft/link route.
+ */
+authRouter.post(
+  "/microsoft",
+  microsoftSignInLimiter,
+  validate(microsoftSignInSchema),
+  asyncHandler(async (req, res) => {
+    const clientId = config().MICROSOFT_CLIENT_ID;
+
+    if (!clientId) {
+      throw new HttpError(
+        503,
+        "Microsoft sign-in is not configured on this server.",
+        "MICROSOFT_NOT_CONFIGURED"
+      );
+    }
+
+    const identity = await verifyMicrosoftIdToken(req.body.idToken, clientId);
+    const auth = firebaseAuth();
+    const generatedUid = microsoftFirebaseUid(identity.tenantId, identity.objectId);
+
+    const uid = await transaction(async (client) => {
+      const identityKey = microsoftIdentityKey(identity.tenantId, identity.objectId);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [identityKey]);
+
+      const linked = await client.query<{ firebase_uid: string }>(
+        `SELECT u.firebase_uid
+           FROM auth_identities i
+           JOIN app_users u ON u.id = i.app_user_id
+          WHERE i.provider = 'microsoft' AND i.tenant_id = $1 AND i.provider_user_id = $2`,
+        [identity.tenantId, identity.objectId]
+      );
+      if (linked.rows[0]) return linked.rows[0].firebase_uid;
+
+      // Coordinate with sync-user so two providers cannot claim one address in
+      // parallel. A match is a request to link, never proof that linking is safe.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `app-user-email:${identity.email}`
+      ]);
+      const emailOwner = await client.query(
+        "SELECT 1 FROM app_users WHERE lower(btrim(email)) = $1 LIMIT 1",
+        [identity.email]
+      );
+      if (emailOwner.rowCount) {
+        throw new HttpError(
+          409,
+          "This email already has an IBSi account. Sign in using the original method, then link Microsoft from Account Security.",
+          "ACCOUNT_LINKING_REQUIRED"
+        );
+      }
+
+      let microsoftUser;
+      try {
+        microsoftUser = await auth.getUser(generatedUid);
+      } catch (err) {
+        if ((err as { code?: string }).code !== "auth/user-not-found") throw err;
+
+        try {
+          const emailUser = await auth.getUserByEmail(identity.email);
+          if (emailUser.uid !== generatedUid) {
+            throw new HttpError(
+              409,
+              "This email already has an account. Sign in using the original method, then link Microsoft.",
+              "ACCOUNT_LINKING_REQUIRED"
+            );
+          }
+          microsoftUser = emailUser;
+        } catch (emailError) {
+          if ((emailError as { code?: string }).code !== "auth/user-not-found") throw emailError;
+          microsoftUser = await auth.createUser({
+            uid: generatedUid,
+            email: identity.email,
+            emailVerified: true,
+            displayName: identity.displayName ?? undefined
+          });
+          req.log.info(
+            { uid: generatedUid, tenantId: identity.tenantId },
+            "Created Firebase user from Microsoft identity"
+          );
+        }
+      }
+
+      const appUser = await client.query<{ id: string }>(
+        `INSERT INTO app_users
+           (firebase_uid, email, display_name, email_verified, sign_in_provider)
+         VALUES ($1, $2, $3, true, 'microsoft.com')
+         ON CONFLICT (firebase_uid) DO UPDATE SET
+           display_name = COALESCE(app_users.display_name, EXCLUDED.display_name),
+           email_verified = true,
+           sign_in_provider = 'microsoft.com',
+           updated_at = now()
+         RETURNING id`,
+        [microsoftUser.uid, identity.email, identity.displayName]
+      );
+
+      await client.query(
+        `INSERT INTO auth_identities
+           (app_user_id, provider, tenant_id, provider_user_id, email_at_link)
+         VALUES ($1, 'microsoft', $2, $3, $4)`,
+        [appUser.rows[0]!.id, identity.tenantId, identity.objectId, identity.email]
+      );
+
+      return microsoftUser.uid;
+    });
+
+    const customToken = await auth.createCustomToken(uid, {
+      provider: "microsoft.com",
+      microsoftTenantId: identity.tenantId,
+      microsoftObjectId: identity.objectId
+    });
+
+    res.json({ customToken });
+  })
+);
+
+/** Links Microsoft only after both accounts have been authenticated. */
+authRouter.post(
+  "/microsoft/link",
+  microsoftSignInLimiter,
+  ...privateRoute,
+  validate(microsoftSignInSchema),
+  asyncHandler(async (req, res) => {
+    const clientId = config().MICROSOFT_CLIENT_ID;
+    if (!clientId) {
+      throw new HttpError(503, "Microsoft sign-in is not configured on this server.", "MICROSOFT_NOT_CONFIGURED");
+    }
+
+    const identity = await verifyMicrosoftIdToken(req.body.idToken, clientId);
+    await transaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        microsoftIdentityKey(identity.tenantId, identity.objectId)
+      ]);
+      const existing = await client.query<{ app_user_id: string }>(
+        `SELECT app_user_id FROM auth_identities
+          WHERE provider = 'microsoft' AND tenant_id = $1 AND provider_user_id = $2`,
+        [identity.tenantId, identity.objectId]
+      );
+      if (existing.rows[0] && existing.rows[0].app_user_id !== req.appUser!.id) {
+        throw new HttpError(409, "This Microsoft account is already linked to another IBSi account.", "MICROSOFT_ALREADY_LINKED");
+      }
+      if (!existing.rows[0]) {
+        await client.query(
+          `INSERT INTO auth_identities
+             (app_user_id, provider, tenant_id, provider_user_id, email_at_link)
+           VALUES ($1, 'microsoft', $2, $3, $4)`,
+          [req.appUser!.id, identity.tenantId, identity.objectId, identity.email]
+        );
+      }
+    });
+
+    res.status(204).send();
+  })
+);
 
 authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res) => {
   const token = req.firebaseUser!;
@@ -42,7 +232,23 @@ authRouter.post("/sync-user", verifyFirebaseToken, asyncHandler(async (req, res)
   // of providers on the account - only firebase-admin can give that - but a
   // sound proxy while one email means one account, because a reader who signed
   // up with Google has no password to sign in with and never overwrites it.
-  const signInProvider = token.firebase?.sign_in_provider ?? null;
+  /**
+   * `provider` first, then Firebase's own claim.
+   *
+   * Firebase reports `sign_in_provider: 'custom'` for every custom-token
+   * sign-in, which is true and useless - it says how the session was minted,
+   * not who vouched for the person. Microsoft sign-ins arrive that way (see
+   * POST /microsoft below for why they have to), so without this the column
+   * would read 'custom' for every one of them and nothing would record that
+   * Microsoft was involved at all.
+   *
+   * The claim is set by this server when it mints the token, so it is not
+   * caller-supplied: a client cannot put a provider of its choosing here.
+   */
+  const signInProvider =
+    (typeof token.provider === "string" ? token.provider : null) ??
+    token.firebase?.sign_in_provider ??
+    null;
 
   const user = await transaction(async (client) => {
     if (email) {
