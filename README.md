@@ -164,6 +164,28 @@ PDF filename in `pv_ibsi_journal_data.redirect_page`; never expose or store the
 physical server path in API responses. The directory must not be served as a
 public static folder.
 
+**Production does not use that default.** The App Service is Linux, so a
+`C:\` path cannot exist there, and files on a server's disk do not travel with
+a deploy - between the Azure move on 8 September 2026 and 12 September every
+journal and white paper returned `*_FILE_NOT_FOUND`. The PDFs now live in the
+**`pdf-previews` container of the `stibsimobileprod` storage account**
+(rg-ibsi-mobile-prod), mounted into `app-ibsi-api-prod` as an Azure Blob path
+mapping at `/mounts/pdf-previews`, with these App Service settings:
+
+```text
+JOURNAL_STORAGE_DIR=/mounts/pdf-previews/journals
+WHITEPAPER_STORAGE_DIR=/mounts/pdf-previews/whitepapers
+```
+
+Blob path mappings need a Basic tier plan or higher (this one is B1). None of
+this lives in the repo or the deploy workflow: settings and mounts belong to
+the App Service and survive every deploy, but they would be **lost if the App
+Service were recreated**, which is why they are written down here. The
+container's name is historical - it holds the full PDFs, not previews.
+
+Uploading is manual today: a new issue arriving on the Galaxy web server has to
+be copied into `journals/` in that container before the app can open it.
+
 Journal cover filenames from `image_path` are resolved against
 `JOURNAL_IMAGE_BASE_URL`. List responses include both the original `image_path`
 and the complete `image_url` for direct use by the mobile app.
@@ -187,9 +209,11 @@ of at least 32 characters and rotate it to invalidate every outstanding link.
 
 ## IBSi white papers
 
-White papers follow the journal model. Access is premium throughout: listing
-and viewing both require an authenticated user with an active entitlement (or a
-staff role), so nothing is visible without a subscription.
+White papers follow the journal model for storage, but **not for access: they
+are free.** Listing and view-link minting both sit on `resolveOptionalUser`
+with no entitlement check, so a caller with no account reads the same library -
+which is what the app's free Insights tab relies on. The earlier
+premium-throughout rule is gone; journals remain premium.
 
 The one behavioural difference from journals is that **only rows the CMS has
 marked live are published**. The filter is `lower(btrim(live_status)) = 'live'`,

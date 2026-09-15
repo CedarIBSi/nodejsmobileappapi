@@ -163,6 +163,12 @@ Cloudflare currently returns `403` to WordPress calls from this server. Until th
 | `WHITEPAPER_SIGNING_SECRET` | For view links | At least 32 characters and distinct from journal secret |
 | `WHITEPAPER_URL_TTL_SECONDS` | No | 60–86400; default `3600` |
 
+The two storage defaults are Windows paths for local development only. The
+Azure App Service is Linux and sets `JOURNAL_STORAGE_DIR=/mounts/pdf-previews/journals`
+and `WHITEPAPER_STORAGE_DIR=/mounts/pdf-previews/whitepapers`, pointing at the
+`pdf-previews` blob container mounted into the app. See the README for why, and
+for what to recreate if the App Service is ever rebuilt.
+
 The current API has removed Razorpay create/cancel and webhook flows. Mobile purchases use Google Play and Apple, and `.env.example` contains only the current configuration names and safe placeholders.
 
 ## 5. Authentication
