@@ -7,10 +7,12 @@ import { HttpError } from "../lib/errors.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute, resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
+import { newsRegionSlugs } from "../lib/news-regions.js";
 import {
   getArticleContent,
   listNews,
   listNewsCategories,
+  listNewsRegions,
   searchNews
 } from "../services/wordpress.js";
 
@@ -24,7 +26,12 @@ const accessSchema = z.object({
   installation_id: z.uuid().optional()
 });
 const newsListSchema = paginationSchema.extend({
-  category: z.coerce.number().int().positive().optional()
+  category: z.coerce.number().int().positive().optional(),
+  // An enum, so an unrecognised slug is a 400 rather than a silent pass. A
+  // region the server does not know would otherwise return unfiltered global
+  // news, which the app would then display under that region's heading - the
+  // one failure here that a reader cannot see and would not think to doubt.
+  region: z.enum(newsRegionSlugs).optional()
 });
 const newsSearchSchema = newsListSchema.extend({
   // Two characters is the shortest useful term; the cap keeps a pathological
@@ -87,26 +94,34 @@ async function mayReadArticleBody(input: {
 
 
 newsRouter.get("/", validate(newsListSchema, "query"), asyncHandler(async (req, res) => {
-  const { category, limit, page } = req.query as unknown as {
+  const { category, limit, page, region } = req.query as unknown as {
     category?: number;
     limit: number;
     page: number;
+    region?: string;
   };
-  const { items, total } = await listNews(page, limit, category);
+  const { items, total } = await listNews(page, limit, category, region);
   res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
   res.json({ articles: items, pagination: pagination(page, limit, total) });
 }));
 
 newsRouter.get("/search", validate(newsSearchSchema, "query"), asyncHandler(async (req, res) => {
-  const { category, limit, page, q } = req.query as unknown as {
+  const { category, limit, page, q, region } = req.query as unknown as {
     category?: number;
     limit: number;
     page: number;
     q: string;
+    region?: string;
   };
-  const { items, total } = await searchNews(q, page, limit, category);
+  const { items, total } = await searchNews(q, page, limit, category, region);
   res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
   res.json({ articles: items, pagination: pagination(page, limit, total) });
+}));
+
+newsRouter.get("/regions", asyncHandler(async (_req, res) => {
+  const regions = await listNewsRegions();
+  res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
+  res.json({ regions });
 }));
 
 newsRouter.get("/categories", asyncHandler(async (_req, res) => {

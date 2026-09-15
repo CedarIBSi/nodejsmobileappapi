@@ -1,5 +1,10 @@
 import { config } from "../config.js";
 import { HttpError } from "../lib/errors.js";
+import {
+  findNewsRegion,
+  newsRegionTagParam,
+  newsRegions
+} from "../lib/news-regions.js";
 
 /**
  * Reads podcast and video listings from the WordPress REST API.
@@ -317,14 +322,19 @@ function newsWindowStart(months: number): string {
 export async function listNews(
   page: number,
   limit: number,
-  categoryId?: number
+  categoryId?: number,
+  regionSlug?: string
 ): Promise<MediaPage<NewsItem>> {
   const months = config().NEWS_WINDOW_MONTHS;
-  const key = `news:${page}:${limit}:${categoryId ?? "all"}`;
+  const region = findNewsRegion(regionSlug);
+  const key = `news:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
 
   return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
     const params: Record<string, string> = { after: newsWindowStart(months) };
     if (categoryId) params.categories = String(categoryId);
+    // Comma-separated tag ids are OR in the WordPress REST API, which is what
+    // a region needs: any one of its spellings counts as a match.
+    if (region) params.tags = newsRegionTagParam(region);
 
     const { posts, total } = await fetchPostType("ibsi_news", page, limit, {
       fields: newsListFields,
@@ -355,14 +365,17 @@ export async function searchNews(
   term: string,
   page: number,
   limit: number,
-  categoryId?: number
+  categoryId?: number,
+  regionSlug?: string
 ): Promise<MediaPage<NewsItem>> {
   const query = term.trim();
-  const key = `news:search:${query.toLowerCase()}:${page}:${limit}:${categoryId ?? "all"}`;
+  const region = findNewsRegion(regionSlug);
+  const key = `news:search:${query.toLowerCase()}:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
 
   return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
     const params: Record<string, string> = { orderby: "relevance", search: query };
     if (categoryId) params.categories = String(categoryId);
+    if (region) params.tags = newsRegionTagParam(region);
 
     const { posts, total } = await fetchPostType("ibsi_news", page, limit, {
       fields: newsListFields,
@@ -379,6 +392,73 @@ export async function searchNews(
     }));
 
     return { items, total };
+  });
+}
+
+/**
+ * How many news stories a set of tags has in the current window.
+ *
+ * Deliberately not fetchPostType: that asks for `_embed` and the full list
+ * fields to build items nobody reads here. This wants one number, so it asks
+ * for one id and reads the count out of the header.
+ */
+async function countNewsByTags(tagIds: number[], after: string): Promise<number> {
+  const url = new URL("/wp-json/wp/v2/ibsi_news", config().WORDPRESS_BASE_URL);
+  url.searchParams.set("per_page", "1");
+  url.searchParams.set("_fields", "id");
+  url.searchParams.set("after", after);
+  url.searchParams.set("tags", tagIds.join(","));
+
+  const response = await wordPressRequest(url, "application/json");
+  return Number(response.headers.get("x-wp-total") ?? 0);
+}
+
+/**
+ * The regions the app may filter by, with a live count each.
+ *
+ * The counts are the point. Topic and region are independent, and narrow
+ * combinations collapse hard - Payments alone runs to ~990 stories a year,
+ * Payments in Africa to 17. Sending the numbers lets the app show what a
+ * region is worth before the reader commits to it, instead of presenting
+ * seven equal-looking choices and emptying the feed for three of them.
+ *
+ * `tagIds` goes out too, and is not an implementation leak: the app falls back
+ * to calling WordPress directly when this API is unreachable, and without the
+ * ids that fallback would quietly drop the region and serve global news under
+ * a region heading.
+ */
+export type NewsRegionItem = {
+  count: number;
+  name: string;
+  slug: string;
+  tag_ids: number[];
+};
+
+export async function listNewsRegions(): Promise<NewsRegionItem[]> {
+  return cached("news:regions", config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const after = newsWindowStart(config().NEWS_WINDOW_MONTHS);
+    const items: NewsRegionItem[] = [];
+
+    // Sequential, not Promise.all. Seven simultaneous requests is exactly the
+    // burst Cloudflare drops one of, and it does so silently - the observed
+    // failure was a single region returning nothing while the other six were
+    // fine. One at a time costs a few seconds on a cache miss and nothing
+    // afterwards.
+    for (const region of newsRegions) {
+      const count = await countNewsByTags(region.tagIds, after).catch(() =>
+        // One retry, because the failure is transient by nature.
+        countNewsByTags(region.tagIds, after)
+      );
+
+      items.push({
+        count,
+        name: region.name,
+        slug: region.slug,
+        tag_ids: region.tagIds
+      });
+    }
+
+    return items;
   });
 }
 
