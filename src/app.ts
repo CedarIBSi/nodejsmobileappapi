@@ -13,6 +13,7 @@ import { galaxyRouter } from "./routes/galaxy.js";
 import { awardsRouter } from "./routes/awards.js";
 import { eventsRouter } from "./routes/events.js";
 import { adsRouter } from "./routes/ads.js";
+import { homePromoRouter } from "./routes/home-promo.js";
 import { journalRouter } from "./routes/journals.js";
 import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
@@ -105,6 +106,7 @@ export function createApp() {
   app.use("/v1/awards", awardsRouter);
   app.use("/v1/events", eventsRouter);
   app.use("/v1/ads", adsRouter);
+  app.use("/v1/home-promo", homePromoRouter);
   app.use("/v1/journals", journalRouter);
   app.use("/v1/whitepapers", whitepaperRouter);
   app.use("/v1/podcasts", podcastRouter);
