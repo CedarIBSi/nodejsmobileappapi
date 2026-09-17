@@ -284,7 +284,21 @@ authActionRouter.get("/", asyncHandler(async (req, res) => {
     return;
   }
 
-  if (opensTheApp(req.get("user-agent"))) {
+  /**
+   * Only verification is handed to the app, because only verification is
+   * something the app can finish. SignInScreen matches on mode === 'verifyEmail'
+   * and ignores anything else, so a phone sent an email-recovery link would
+   * have opened the app, matched nothing, and sat there - the code unspent and
+   * the reader given no reason why.
+   *
+   * Neither recoverEmail nor verifyAndChangeEmail can fire today: Firebase only
+   * sends them when an account's email address changes, and nothing in either
+   * repo calls updateEmail or verifyBeforeUpdateEmail. They are handled anyway
+   * because the day somebody adds a change-email screen, this route will start
+   * receiving them without anyone thinking to come back here - and the form
+   * below completes them correctly on any device.
+   */
+  if (query.mode === "verifyEmail" && opensTheApp(req.get("user-agent"))) {
     res.redirect(302, appHandoffUrl(query));
     return;
   }

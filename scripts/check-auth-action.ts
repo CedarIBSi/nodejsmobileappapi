@@ -122,12 +122,23 @@ async function run() {
       'HTTP ' + res.status + ' ' + loc.slice(0, 70));
   }
 
-  for (const mode of ['verifyEmail', 'recoverEmail', 'verifyAndChangeEmail']) {
-    const { res } = await get(`/auth/action?mode=${mode}&oobCode=${code}&apiKey=${key}`, ANDROID);
+  {
+    const { res } = await get(
+      `/auth/action?mode=verifyEmail&oobCode=${code}&apiKey=${key}`, ANDROID);
     const loc = res.headers.get('location') ?? '';
-    record(mode + ' on a phone -> app',
+    record('verifyEmail on a phone -> app',
       res.status === 302 && loc.startsWith('ibsintelligence://app-auth') && loc.includes(code),
       'HTTP ' + res.status + ' ' + loc.slice(0, 60));
+  }
+
+  // The app matches on verifyEmail alone, so anything else must reach a page
+  // that can actually finish the job rather than opening the app to nothing.
+  for (const mode of ['recoverEmail', 'verifyAndChangeEmail']) {
+    const { body, res } = await get(
+      `/auth/action?mode=${mode}&oobCode=${code}&apiKey=${key}`, ANDROID);
+    record(mode + ' on a phone -> form, not the app',
+      res.status === 200 && body.includes('method="post"'),
+      'HTTP ' + res.status + ' ' + (res.headers.get('location') ?? 'no redirect'));
   }
 
   // 4. The desktop form, and the wording it uses per mode.
