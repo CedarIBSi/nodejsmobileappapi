@@ -2,8 +2,6 @@ import { Router, urlencoded } from "express";
 import { z } from "zod";
 import { config } from "../config.js";
 import { asyncHandler } from "../lib/async-handler.js";
-import { HttpError } from "../lib/errors.js";
-import { validate } from "../middleware/validate.js";
 
 export const authActionRouter = Router();
 
@@ -65,11 +63,17 @@ const autoAppliedModes = new Set(["verifyEmail", "recoverEmail", "verifyAndChang
 const opensTheApp = (userAgent: string | undefined) =>
   /android|iphone|ipad|ipod/i.test(userAgent ?? "");
 
-const firebaseHandlerUrl = (query: ActionQuery) => {
+/**
+ * Null rather than a thrown HttpError. A throw here reached the shared error
+ * handler and came back as JSON - the same shape of answer that failed
+ * Firebase's review of this URL, reachable on a misconfigured deploy rather
+ * than on a malformed request. Every exit from this route is a page.
+ */
+const firebaseHandlerUrl = (query: ActionQuery): string | null => {
   const authDomain = config().FIREBASE_AUTH_DOMAIN;
 
   if (!authDomain) {
-    throw new HttpError(503, "Authentication handler is not configured", "AUTH_HANDLER_NOT_CONFIGURED");
+    return null;
   }
 
   const target = new URL("https://" + authDomain + "/__/auth/action");
@@ -139,6 +143,89 @@ const renderPage = (parts: { body: string; heading: string; title: string }) => 
 `;
 
 /**
+ * The three intercepted modes are not the same errand, and the page said they
+ * were.
+ *
+ * Every one of them rendered "You are one step from finishing your IBSi News
+ * account" under the heading "Confirm your email address". For verifyEmail
+ * that is right. For recoverEmail it is wrong in a way that matters: that link
+ * goes to the *old* address after someone changed the account's email, so the
+ * reader is undoing a change they may not have made, and telling them they are
+ * finishing a signup is both false and reassuring at the moment they should be
+ * paying attention.
+ *
+ * Firebase's documentation also suggests offering a password reset after a
+ * recovery, since an unrequested email change usually means the account is
+ * already in someone else's hands. The success copy below says so.
+ */
+type ActionMode = ActionQuery["mode"];
+
+const modeCopy: Record<
+  string,
+  { button: string; heading: string; intro: string; successBody: string; successHeading: string }
+> = {
+  recoverEmail: {
+    button: "Restore my email address",
+    heading: "Restore your email address",
+    intro:
+      "The email address on your IBSi News account was changed. Confirm below to change it back to this address.",
+    successBody:
+      "<p>Your account's email address has been restored.</p><p>If you did not ask for it to be changed, someone else may have access to your account. Open the IBSi News app and reset your password now.</p>",
+    successHeading: "Email address restored"
+  },
+  verifyAndChangeEmail: {
+    button: "Confirm my new email address",
+    heading: "Confirm your new email address",
+    intro:
+      "Confirm that this is the address you want to use for your IBSi News account.",
+    successBody:
+      "<p>Your new email address is confirmed. Open the IBSi News app and sign in with it.</p><p class=\"muted\">You can close this page.</p>",
+    successHeading: "Email address confirmed"
+  },
+  verifyEmail: {
+    button: "Confirm my email address",
+    heading: "Confirm your email address",
+    intro:
+      "You are one step from finishing your IBSi News account. Confirm the email address this message was sent to.",
+    successBody:
+      "<p>Your email address is confirmed. Open the IBSi News app on your phone and sign in to finish setting up your account.</p><p class=\"muted\">You can close this page.</p>",
+    successHeading: "Email confirmed"
+  }
+};
+
+/** Falls back to the verification wording, which is the commonest link by far. */
+const copyForMode = (mode: string) => modeCopy[mode] ?? modeCopy.verifyEmail!;
+
+/**
+ * What to send when the link is not a usable one.
+ *
+ * This page exists because the route used to answer a bad request the way
+ * every other route does - a JSON 400 from the shared validator - and this is
+ * not an API. It is the address printed in the emails Firebase sends, so the
+ * things that open it are people, and link scanners, and Google's own
+ * validator when the custom action URL is registered. That validator rejected
+ * it, and was right to: the response was not a page at all, and its body
+ * listed every parameter the endpoint accepts, each one's expected type, and
+ * the complete set of valid modes. An endpoint publishing its own contract to
+ * anyone who sends it an empty request is a finding on any security review.
+ *
+ * Deliberately 200 rather than 400. Nothing is broken when someone opens this
+ * address without a code - the reader followed an old link, or a scanner
+ * fetched the bare URL - and a page that says so plainly is the correct
+ * answer. The wording never distinguishes "no code" from "malformed code"
+ * either: the difference matters to no honest reader, and telling the other
+ * sort which of their guesses was closer is free help.
+ */
+const renderUnusableLink = () =>
+  renderPage({
+    body: `
+    <p>This link is not valid. Verification and password links expire, and each one can be used only once.</p>
+    <p>Open the IBSi News app and sign in to have a new one sent to you.</p>`,
+    heading: "This link is not valid",
+    title: "Link not valid - IBSi News"
+  });
+
+/**
  * Redeems the code through Identity Toolkit.
  *
  * The Admin SDK has no applyActionCode, so this goes through the same public
@@ -164,13 +251,36 @@ async function spendActionCode(oobCode: string, apiKey: string): Promise<boolean
   }
 }
 
-authActionRouter.get("/", validate(actionQuerySchema, "query"), asyncHandler(async (req, res) => {
-  const query = req.query as unknown as ActionQuery;
+authActionRouter.get("/", asyncHandler(async (req, res) => {
   res.set("Cache-Control", "no-store");
+
+  // Not the shared `validate` middleware: it answers JSON, which is right for
+  // the API and wrong for the one route in this server that a browser is meant
+  // to land on. See renderUnusableLink.
+  const parsed = actionQuerySchema.safeParse(req.query);
+
+  if (!parsed.success) {
+    req.log.info(
+      { hasCode: Boolean((req.query as Record<string, unknown>).oobCode) },
+      "Email action link opened without usable parameters"
+    );
+    res.type("html").send(renderUnusableLink());
+    return;
+  }
+
+  const query = parsed.data;
 
   // Reset needs Firebase's form, and loading that form redeems nothing.
   if (!autoAppliedModes.has(query.mode)) {
-    res.redirect(302, firebaseHandlerUrl(query));
+    const target = firebaseHandlerUrl(query);
+
+    if (!target) {
+      req.log.error("FIREBASE_AUTH_DOMAIN is not set; cannot forward a reset link");
+      res.type("html").send(renderUnusableLink());
+      return;
+    }
+
+    res.redirect(302, target);
     return;
   }
 
@@ -187,22 +297,31 @@ authActionRouter.get("/", validate(actionQuerySchema, "query"), asyncHandler(asy
    */
   if (!query.apiKey) {
     req.log.warn("Email action link carried no apiKey; forwarding to Firebase");
-    res.redirect(302, firebaseHandlerUrl(query));
+    const target = firebaseHandlerUrl(query);
+
+    if (!target) {
+      res.type("html").send(renderUnusableLink());
+      return;
+    }
+
+    res.redirect(302, target);
     return;
   }
 
+  const copy = copyForMode(query.mode);
+
   res.type("html").send(renderPage({
     body: `
-    <p>You are one step from finishing your IBSi News account. Confirm the email address this message was sent to.</p>
+    <p>${escapeHtml(copy.intro)}</p>
     <form action="/auth/action/confirm" method="post">
       <input type="hidden" name="mode" value="${escapeHtml(query.mode)}">
       <input type="hidden" name="oobCode" value="${escapeHtml(query.oobCode)}">
       <input type="hidden" name="apiKey" value="${escapeHtml(query.apiKey)}">
-      <button type="submit">Confirm my email address</button>
+      <button type="submit">${escapeHtml(copy.button)}</button>
     </form>
-    <p class="muted">Opening this email on your phone confirms it automatically, without this step.</p>`,
-    heading: "Confirm your email address",
-    title: "Confirm your email address - IBSi News"
+    <p class="muted">Opening this email on your phone completes it automatically, without this step.</p>`,
+    heading: copy.heading,
+    title: copy.heading + " - IBSi News"
   }));
 }));
 
@@ -213,10 +332,19 @@ authActionRouter.get("/", validate(actionQuerySchema, "query"), asyncHandler(asy
 authActionRouter.post(
   "/confirm",
   urlencoded({ extended: false, limit: "16kb" }),
-  validate(confirmBodySchema, "body"),
   asyncHandler(async (req, res) => {
-    const body = req.body as ConfirmBody;
     res.set("Cache-Control", "no-store");
+
+    // As with the GET: this form is submitted by a browser, so a bad submission
+    // gets the page rather than the validator's JSON.
+    const parsed = confirmBodySchema.safeParse(req.body);
+
+    if (!parsed.success) {
+      res.type("html").send(renderUnusableLink());
+      return;
+    }
+
+    const body = parsed.data;
 
     const applied = await spendActionCode(body.oobCode, body.apiKey);
     req.log.info({ applied, mode: body.mode }, "Email action code submitted from the web form");
@@ -232,12 +360,12 @@ authActionRouter.post(
       return;
     }
 
+    const copy = copyForMode(body.mode);
+
     res.type("html").send(renderPage({
-      body: `
-      <p>Your email address is confirmed. Open the IBSi News app on your phone and sign in to finish setting up your account.</p>
-      <p class="muted">You can close this page.</p>`,
-      heading: "Email confirmed",
-      title: "Email confirmed - IBSi News"
+      body: copy.successBody,
+      heading: copy.successHeading,
+      title: copy.successHeading + " - IBSi News"
     }));
   })
 );
