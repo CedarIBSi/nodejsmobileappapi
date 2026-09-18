@@ -64,8 +64,6 @@ export function createApp() {
   // client can call signInWithEmailLink with the original parameters intact.
   app.get("/app-auth", (req, res) => {
     const suppliedLink = typeof req.query.link === "string" ? req.query.link : undefined;
-    let fullLink: string;
-
     if (suppliedLink) {
       // Only Firebase Hosting action links are accepted as nested sign-in links.
       const parsed = new URL(suppliedLink);
@@ -77,15 +75,27 @@ export function createApp() {
         res.status(400).json({ error: { code: "INVALID_AUTH_LINK", message: "Invalid Firebase authentication link" } });
         return;
       }
-      fullLink = parsed.toString();
-    } else {
-      // Retain the complete HTTPS callback when Firebase forwards action
-      // parameters directly instead of wrapping them in `link`.
-      fullLink = new URL(req.originalUrl, env.APP_BASE_URL).toString();
+      const appUrl = `${env.MOBILE_APP_SCHEME}://app-auth?link=${encodeURIComponent(parsed.toString())}`;
+      res.redirect(302, appUrl);
+      return;
     }
 
-    const appUrl = `${env.MOBILE_APP_SCHEME}://app-auth?link=${encodeURIComponent(fullLink)}`;
-    res.redirect(302, appUrl);
+    /**
+     * No nested Firebase link, so this is a plain continueUrl - the address
+     * Firebase's own page sends a reader to after they finish a password reset.
+     * Its query is the state the app needs, and wrapping it in `link=` buried
+     * it: the app reads top-level parameters only, so everything passed here
+     * arrived as one opaque string and the app could not tell why it had been
+     * opened. Forwarded as-is instead.
+     */
+    const forwarded = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(req.query)) {
+      if (typeof value === "string") forwarded.set(key, value);
+    }
+
+    const query = forwarded.toString();
+    res.redirect(302, `${env.MOBILE_APP_SCHEME}://app-auth${query ? "?" + query : ""}`);
   });
   /**
    * Firebase's email action handler, replaced so that nothing redeems a
