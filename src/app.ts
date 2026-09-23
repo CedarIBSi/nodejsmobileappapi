@@ -9,6 +9,7 @@ import { entitlementRouter } from "./routes/entitlements.js";
 import { healthRouter } from "./routes/health.js";
 import { podcastRouter, videoRouter } from "./routes/media.js";
 import { newsRouter } from "./routes/news.js";
+import { fintechLabRouter } from "./routes/fintech-lab.js";
 import { galaxyRouter } from "./routes/galaxy.js";
 import { awardsRouter } from "./routes/awards.js";
 import { eventsRouter } from "./routes/events.js";
@@ -114,6 +115,7 @@ export function createApp() {
   app.use("/v1/news", newsRouter);
   app.use("/v1/galaxy", galaxyRouter);
   app.use("/v1/awards", awardsRouter);
+  app.use("/v1/fintech-lab", fintechLabRouter);
   app.use("/v1/events", eventsRouter);
   app.use("/v1/ads", adsRouter);
   app.use("/v1/home-promo", homePromoRouter);
