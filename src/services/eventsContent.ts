@@ -52,6 +52,7 @@ export type EventsPage = {
   series: EventSeries[];
   stats: EventStat[];
   upcoming: UpcomingEvent[];
+  introPoints: string[];
   videos: EventVideo[];
 };
 
@@ -71,6 +72,7 @@ type EventsPageRow = {
   about: EventsAbout | Record<string, never> | null;
   insights: EventInsight[] | null;
   intro: string;
+  intro_points: string[] | null;
   series: EventSeries[] | null;
   stats: EventStat[] | null;
   videos: EventVideo[] | null;
@@ -94,7 +96,7 @@ const upcomingSql = `
 `;
 
 const pageSql = `
-  SELECT intro, about, stats, series, videos, insights
+  SELECT intro, intro_points, about, stats, series, videos, insights
   FROM events_page
   WHERE id = 1
 `;
@@ -132,6 +134,9 @@ export async function getEventsPage(): Promise<EventsPage> {
     about: toAbout(content?.about ?? null),
     insights: content?.insights ?? [],
     intro: content?.intro ?? "",
+    // The bulleted list under the intro. jsonb, so guard the shape rather
+    // than trust it - a hand-edited row could hold anything.
+    introPoints: Array.isArray(content?.intro_points) ? content.intro_points : [],
     series: content?.series ?? [],
     stats: content?.stats ?? [],
     upcoming: events.rows.map((row) => ({
