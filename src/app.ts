@@ -10,6 +10,7 @@ import { healthRouter } from "./routes/health.js";
 import { podcastRouter, videoRouter } from "./routes/media.js";
 import { newsRouter } from "./routes/news.js";
 import { advisoryRouter } from "./routes/advisory.js";
+import { researchReportsRouter } from "./routes/research-reports.js";
 import { thoughtLeadershipRouter } from "./routes/thought-leadership.js";
 import { fintechLabRouter } from "./routes/fintech-lab.js";
 import { galaxyRouter } from "./routes/galaxy.js";
@@ -118,6 +119,7 @@ export function createApp() {
   app.use("/v1/galaxy", galaxyRouter);
   app.use("/v1/awards", awardsRouter);
   app.use("/v1/fintech-lab", fintechLabRouter);
+  app.use("/v1/research-reports", researchReportsRouter);
   app.use("/v1/advisory", advisoryRouter);
   app.use("/v1/thought-leadership", thoughtLeadershipRouter);
   app.use("/v1/events", eventsRouter);
