@@ -124,8 +124,8 @@ export async function reconcileStoreSubscription(
   const upserted = await client.query<{ id: string; user_id: string }>(
     `INSERT INTO subscriptions
        (user_id, local_plan_id, status, provider, provider_subscription_id, environment,
-        current_start, current_end, cancelled_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        current_start, current_end, cancelled_at, first_subscribed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($7, now()))
      ON CONFLICT (provider, provider_subscription_id) WHERE provider_subscription_id IS NOT NULL
      DO UPDATE SET
        status = EXCLUDED.status,
@@ -134,6 +134,12 @@ export async function reconcileStoreSubscription(
        current_start = COALESCE(EXCLUDED.current_start, subscriptions.current_start),
        current_end = COALESCE(EXCLUDED.current_end, subscriptions.current_end),
        cancelled_at = EXCLUDED.cancelled_at,
+       -- The journal archive window hangs off this date, so it may only ever
+       -- move earlier. LEAST rather than "leave it alone" because the first
+       -- row can be written by a renewal webhook that only knows the current
+       -- period; a later message carrying the true original start corrects it,
+       -- and no renewal can push a subscriber's window forward.
+       first_subscribed_at = LEAST(subscriptions.first_subscribed_at, EXCLUDED.first_subscribed_at),
        updated_at = now()
      RETURNING id, user_id`,
     [

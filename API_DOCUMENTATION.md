@@ -464,9 +464,25 @@ Public marketing/about content; cached for 300 seconds.
 
 Query: `page`, `limit`, optional `year`, `edition_type`, and `search`. PDF filenames are never returned.
 
+Each journal carries `locked`, and the response carries
+`archive: { full, from_month }`. Yearly subscribers and staff get
+`full: true` and nothing locked; a monthly subscriber gets `from_month`
+(`YYYY-MM`, the month they first subscribed) and `locked: true` on every
+edition published before it. Locked editions stay in the listing on purpose —
+they are the upgrade prompt.
+
+The window is `MIN(subscriptions.first_subscribed_at)` across all of a user's
+subscriptions, lapsed ones included, so cancelling and resubscribing keeps the
+original window. Access still requires a currently active entitlement.
+
 #### `POST /v1/journals/:journal_id/view-link` — Private + premium/staff
 
 Returns a signed, expiring `view_url`. Response must not be cached.
+
+Enforces the archive window: an edition outside it returns `403`
+`ARCHIVE_UPGRADE_REQUIRED` (distinct from `402` `SUBSCRIPTION_REQUIRED`, which
+means no subscription at all). This is the authoritative check — the `locked`
+flag on the listing is presentation only.
 
 #### `GET /v1/journals/view/:token`
 

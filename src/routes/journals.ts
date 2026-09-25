@@ -5,8 +5,9 @@ import { z } from "zod";
 import { config } from "../config.js";
 import { query } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
-import { hasActiveEntitlement } from "../lib/entitlement.js";
+import { type ArchiveAccess, resolveArchiveAccess } from "../lib/entitlement.js";
 import { HttpError } from "../lib/errors.js";
+import { isJournalLocked } from "../lib/journal-archive.js";
 import { createJournalToken, verifyJournalToken } from "../lib/journal-token.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute } from "../middleware/auth.js";
@@ -47,10 +48,20 @@ const listSchema = paginationSchema.extend({
 const journalParams = z.object({ journal_id: z.string().regex(/^[1-9]\d*$/) });
 const viewParams = z.object({ token: z.string().min(20).max(2048) });
 
-async function requireJournalAccess(user: NonNullable<Express.Request["appUser"]>) {
-  if (!await hasActiveEntitlement(user.id, user.role)) {
+/**
+ * Every journal endpoint needs the same two answers: may this user be here at
+ * all, and how far back does their plan reach. Returning the window rather than
+ * a boolean is what lets the listing mark individual issues without a second
+ * lookup per row.
+ */
+async function requireJournalAccess(
+  user: NonNullable<Express.Request["appUser"]>
+): Promise<ArchiveAccess> {
+  const access = await resolveArchiveAccess(user.id, user.role);
+  if (!access.hasAccess) {
     throw new HttpError(402, "An active subscription is required", "SUBSCRIPTION_REQUIRED");
   }
+  return access;
 }
 
 function journalImageUrl(imagePath: string | null): string | null {
@@ -95,7 +106,7 @@ journalRouter.get("/filters", ...privateRoute, asyncHandler(async (req, res) => 
 }));
 
 journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHandler(async (req, res) => {
-  await requireJournalAccess(req.appUser!);
+  const access = await requireJournalAccess(req.appUser!);
   const { page, limit, year, edition_type: editionType, search } = req.query as unknown as {
     page: number; limit: number; year?: number; edition_type?: string; search?: string;
   };
@@ -133,22 +144,40 @@ journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHand
   );
   res.set("Cache-Control", "private, no-store");
   res.json({
+    // Issues outside the reader's window stay in the listing, marked, rather
+    // than being filtered out: a monthly subscriber scrolling a decade of
+    // locked covers is the clearest argument for the annual plan there is.
     journals: result.rows.map(({ redirect_page: _pdfFilename, ...journal }) => ({
       ...journal,
-      image_url: journalImageUrl(journal.image_path)
+      image_url: journalImageUrl(journal.image_path),
+      locked: isJournalLocked(access, journal.month, journal.year)
     })),
+    archive: { full: access.fullArchive, from_month: access.archiveFromMonth },
     pagination: pagination(page, limit, Number(count.rows[0]?.count ?? 0))
   });
 }));
 
 journalRouter.post("/:journal_id/view-link", ...privateRoute, validate(journalParams, "params"), asyncHandler(async (req, res) => {
-  await requireJournalAccess(req.appUser!);
+  const access = await requireJournalAccess(req.appUser!);
   const journalId = req.params.journal_id as string;
-  const result = await query<{ journal_id: string }>(
-    "SELECT journal_id FROM pv_ibsi_journal_data WHERE journal_id = $1 AND redirect_page IS NOT NULL AND btrim(redirect_page) <> ''",
+  const result = await query<{ journal_id: string; month: string | null; year: string | null }>(
+    "SELECT journal_id, month, year FROM pv_ibsi_journal_data WHERE journal_id = $1 AND redirect_page IS NOT NULL AND btrim(redirect_page) <> ''",
     [journalId]
   );
-  if (!result.rows[0]) throw new HttpError(404, "Journal not found", "JOURNAL_NOT_FOUND");
+  const journal = result.rows[0];
+  if (!journal) throw new HttpError(404, "Journal not found", "JOURNAL_NOT_FOUND");
+
+  // The archive window is enforced here, at the point the signed URL is minted,
+  // and not only in the listing above. The listing is presentation; this is the
+  // grant. A client that skipped the list and posted an id straight here would
+  // otherwise walk out with a working link to an issue outside its plan.
+  if (isJournalLocked(access, journal.month, journal.year)) {
+    throw new HttpError(
+      403,
+      "This edition is included with the annual plan",
+      "ARCHIVE_UPGRADE_REQUIRED"
+    );
+  }
 
   const { token, expiresAt } = createJournalToken(journalId, req.appUser!.id);
   res.set("Cache-Control", "no-store");
