@@ -471,9 +471,16 @@ Each journal carries `locked`, and the response carries
 edition published before it. Locked editions stay in the listing on purpose —
 they are the upgrade prompt.
 
-The window is `MIN(subscriptions.first_subscribed_at)` across all of a user's
+The window is `MIN(subscriptions.archive_from_month)` across all of a user's
 subscriptions, lapsed ones included, so cancelling and resubscribing keeps the
 original window. Access still requires a currently active entitlement.
+
+`archive_from_month` is frozen when the subscription row is first written, as
+the earlier of the joining month and the newest issue published by then — so
+someone who subscribes before the current month's edition ships still gets the
+previous one. It is never recomputed: deriving it live would move the window
+forward as new issues publish and re-lock editions already being read. Rows
+predating the column fall back to the month of `first_subscribed_at`.
 
 #### `POST /v1/journals/:journal_id/view-link` — Private + premium/staff
 

@@ -124,8 +124,22 @@ export async function reconcileStoreSubscription(
   const upserted = await client.query<{ id: string; user_id: string }>(
     `INSERT INTO subscriptions
        (user_id, local_plan_id, status, provider, provider_subscription_id, environment,
-        current_start, current_end, cancelled_at, first_subscribed_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($7, now()))
+        current_start, current_end, cancelled_at, first_subscribed_at, archive_from_month)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($7, now()),
+       -- The journal archive window, frozen at purchase: the earlier of the
+       -- month they subscribed in and the newest issue actually published by
+       -- then, so a subscriber who joins before the month's edition ships still
+       -- has last month's to read. Frozen rather than derived on each request
+       -- because recomputing it would move the window forward as new issues
+       -- publish, taking back editions they had already opened.
+       LEAST(
+         to_char(COALESCE($7, now()) AT TIME ZONE 'UTC', 'YYYY-MM'),
+         COALESCE(
+           (SELECT max(journal_issue_month(month, year)) FROM pv_ibsi_journal_data
+             WHERE redirect_page IS NOT NULL AND btrim(redirect_page) <> ''),
+           to_char(COALESCE($7, now()) AT TIME ZONE 'UTC', 'YYYY-MM')
+         )
+       ))
      ON CONFLICT (provider, provider_subscription_id) WHERE provider_subscription_id IS NOT NULL
      DO UPDATE SET
        status = EXCLUDED.status,
@@ -140,6 +154,15 @@ export async function reconcileStoreSubscription(
        -- period; a later message carrying the true original start corrects it,
        -- and no renewal can push a subscriber's window forward.
        first_subscribed_at = LEAST(subscriptions.first_subscribed_at, EXCLUDED.first_subscribed_at),
+       -- Same one-way rule: a renewal recomputes a later window, and LEAST
+       -- discards it. Preserve NULL on rows predating migration 027: NULL is
+       -- the deliberate marker that makes reads fall back to
+       -- first_subscribed_at. PostgreSQL LEAST ignores NULL, so using it
+       -- directly would silently replace that legacy window on renewal.
+       archive_from_month = CASE
+         WHEN subscriptions.archive_from_month IS NULL THEN NULL
+         ELSE LEAST(subscriptions.archive_from_month, EXCLUDED.archive_from_month)
+       END,
        updated_at = now()
      RETURNING id, user_id`,
     [

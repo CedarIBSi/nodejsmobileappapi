@@ -96,10 +96,15 @@ export async function resolveArchiveAccess(
      SELECT
        EXISTS (SELECT 1 FROM active) AS has_access,
        EXISTS (SELECT 1 FROM active WHERE plan_interval = ANY($2)) AS full_archive,
+       -- The frozen window, earliest across all of the user's subscriptions.
+       -- Rows predating that column fall back to the month they first
+       -- subscribed in, which is exactly how they behaved before it existed.
        -- Read in UTC rather than the server's timezone so the answer does not
        -- depend on where this runs, and so a purchase made in the small hours
        -- of the 1st lands on the earlier month - the generous side.
-       (SELECT to_char(min(first_subscribed_at) AT TIME ZONE 'UTC', 'YYYY-MM')
+       (SELECT min(COALESCE(
+                 archive_from_month,
+                 to_char(first_subscribed_at AT TIME ZONE 'UTC', 'YYYY-MM')))
           FROM subscriptions WHERE user_id = $1) AS archive_from_month`,
     [userId, fullArchiveIntervals]
   );
