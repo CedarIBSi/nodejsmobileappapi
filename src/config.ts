@@ -103,6 +103,9 @@ const schema = z.object({
   WORDPRESS_BYPASS_VALUE: z.string().default(""),
   WORDPRESS_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   MEDIA_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(900),
+  // Process-local WordPress response cache. A hard entry cap prevents public
+  // search terms from growing the Map for the lifetime of the process.
+  MEDIA_CACHE_MAX_ENTRIES: z.coerce.number().int().min(50).max(5_000).default(500),
   // Trimmed: this is typed by hand into an Azure App Service setting, where a
   // trailing space is invisible and resolves to a directory that does not
   // exist. An all-whitespace value falls back rather than resolving to cwd.

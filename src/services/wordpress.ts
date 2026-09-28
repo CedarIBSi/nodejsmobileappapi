@@ -138,10 +138,36 @@ type CacheEntry<T> = { expiresAt: number; value: T };
 const cache = new Map<string, CacheEntry<unknown>>();
 
 async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const now = Date.now();
   const hit = cache.get(key);
-  if (hit && hit.expiresAt > Date.now()) return hit.value as T;
+  if (hit && hit.expiresAt > now) {
+    // Map iteration order is insertion order. Touching a hit makes the entry
+    // most-recently-used so capacity eviction removes genuinely cold data.
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit.value as T;
+  }
+  if (hit) cache.delete(key);
+
   const value = await load();
-  if (ttlMs > 0) cache.set(key, { expiresAt: Date.now() + ttlMs, value });
+  if (ttlMs > 0) {
+    const insertionTime = Date.now();
+
+    // Expired keys used to remain forever unless that exact key was requested
+    // again. A public caller could therefore fill memory with unique searches.
+    for (const [candidateKey, entry] of cache) {
+      if (entry.expiresAt <= insertionTime) cache.delete(candidateKey);
+    }
+
+    const maximumEntries = config().MEDIA_CACHE_MAX_ENTRIES;
+    while (cache.size >= maximumEntries) {
+      const oldestKey = cache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      cache.delete(oldestKey);
+    }
+
+    cache.set(key, { expiresAt: insertionTime + ttlMs, value });
+  }
   return value;
 }
 
@@ -152,6 +178,7 @@ export function clearMediaCache(): void {
 
 async function wordPressRequest(url: URL, accept: string): Promise<Response> {
   const env = config();
+  const configuredOrigin = new URL(env.WORDPRESS_BASE_URL).origin;
   const headers: Record<string, string> = {
     Accept: accept,
     "User-Agent": env.WORDPRESS_USER_AGENT
@@ -160,27 +187,56 @@ async function wordPressRequest(url: URL, accept: string): Promise<Response> {
     headers[env.WORDPRESS_BYPASS_HEADER] = env.WORDPRESS_BYPASS_VALUE;
   }
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(env.WORDPRESS_TIMEOUT_MS)
-    });
-  } catch (error) {
-    throw new HttpError(
-      502,
-      `WordPress request failed: ${(error as Error).message}`,
-      "WORDPRESS_UNREACHABLE"
-    );
+  let currentUrl = url;
+
+  // Fetch follows redirects by default. That is unsafe for the private WAF
+  // bypass header: a compromised WordPress response could redirect to another
+  // host and receive the credential. Handle redirects ourselves and require
+  // every hop to remain on the configured WordPress origin.
+  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    if (currentUrl.origin !== configuredOrigin) {
+      throw new HttpError(
+        502,
+        "WordPress returned an external URL",
+        "WORDPRESS_EXTERNAL_URL"
+      );
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(currentUrl, {
+        headers,
+        redirect: "manual",
+        signal: AbortSignal.timeout(env.WORDPRESS_TIMEOUT_MS)
+      });
+    } catch (error) {
+      throw new HttpError(
+        502,
+        `WordPress request failed: ${(error as Error).message}`,
+        "WORDPRESS_UNREACHABLE"
+      );
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || redirectCount === 5) {
+        throw new HttpError(502, "WordPress returned an invalid redirect", "WORDPRESS_UNAVAILABLE");
+      }
+      currentUrl = new URL(location, currentUrl);
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new HttpError(
+        502,
+        `WordPress returned ${response.status} for ${currentUrl.pathname}`,
+        "WORDPRESS_UNAVAILABLE"
+      );
+    }
+    return response;
   }
-  if (!response.ok) {
-    throw new HttpError(
-      502,
-      `WordPress returned ${response.status} for ${url.pathname}`,
-      "WORDPRESS_UNAVAILABLE"
-    );
-  }
-  return response;
+
+  throw new HttpError(502, "WordPress returned too many redirects", "WORDPRESS_UNAVAILABLE");
 }
 
 async function fetchPostType(

@@ -145,6 +145,7 @@ The configured project is currently `ibsi-fintech-news`. The Android application
 | `WORDPRESS_BYPASS_VALUE` | Environment-specific | Matching secret value |
 | `WORDPRESS_TIMEOUT_MS` | No | Upstream timeout; default `15000` |
 | `MEDIA_CACHE_TTL_SECONDS` | No | In-memory podcast/video cache; default `900` |
+| `MEDIA_CACHE_MAX_ENTRIES` | No | Maximum process-local WordPress cache entries; default `500` |
 | `NEWS_WINDOW_MONTHS` | No | News lookback window; default `6` |
 | `NEWS_TOPIC_COUNT` | No | Maximum category count; default `12` |
 
