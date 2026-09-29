@@ -23,6 +23,7 @@ import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
 import { notificationRouter } from "./routes/notifications.js";
 import { analystOpinionRouter } from "./routes/analyst-opinions.js";
+import { leadershipInterviewRouter } from "./routes/leadership-interviews.js";
 import { authActionRouter } from "./routes/auth-action.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { webhookRouter } from "./routes/webhooks.js";
@@ -130,6 +131,7 @@ export function createApp() {
   app.use("/v1/podcasts", podcastRouter);
   app.use("/v1/videos", videoRouter);
   app.use("/v1/analyst-opinions", analystOpinionRouter);
+  app.use("/v1/leadership-interviews", leadershipInterviewRouter);
   app.use(notFound);
   app.use(errorHandler);
   return app;

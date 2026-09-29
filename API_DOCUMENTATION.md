@@ -555,6 +555,24 @@ Returns the selected item as `analyst_opinion`, including the listing fields
 and its complete `body` (plain text) and `body_html` (rich content). Both a
 numeric WordPress ID and the app's `postid-123` form are accepted.
 
+### Leadership interviews
+
+Leadership Interviews (the WordPress `leadership-interview` post type, listed
+on the site at `/leadership-interviews/`) are free Insights content served in
+the same shape as analyst opinions. Neither endpoint requires sign-in or a
+subscription.
+
+#### `GET /v1/leadership-interviews?page=1&limit=20`
+
+Returns `leadership_interviews[]` with `id`, `title`, `excerpt`, `image_url`,
+`published_at`, and `link`, plus the standard pagination object.
+
+#### `GET /v1/leadership-interviews/:interview_id`
+
+Returns the selected item as `leadership_interview`, including the listing
+fields and its complete `body` (plain text) and `body_html` (rich content).
+Both a numeric WordPress ID and the app's `postid-123` form are accepted.
+
 ### Push notifications
 
 #### `POST /v1/push-token` — Private

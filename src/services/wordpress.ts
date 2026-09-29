@@ -639,18 +639,43 @@ export async function listVideos(page: number, limit: number): Promise<MediaPage
 }
 
 /**
- * IBSi Views / Analyst Opinions are WordPress `articles` posts. They are free
- * Insights content, so both the listing and complete article body are public.
+ * The free editorial collections - Analyst Opinions and Leadership Interviews -
+ * are each a WordPress post type with the same shape: a title, an excerpt, a
+ * featured image and a body. They differ only in the REST base they live under,
+ * so one pair of readers serves both, keyed by post type so the caches never
+ * cross.
  */
-export async function listAnalystOpinions(
+type EditorialPostType = {
+  /** Prefix for cache keys. Must differ per post type. */
+  cachePrefix: string;
+  /** The `rest_base` WordPress registered for the post type. */
+  restBase: string;
+};
+
+const analystOpinionPostType: EditorialPostType = {
+  cachePrefix: "analyst-opinion",
+  restBase: "articles"
+};
+
+/**
+ * Registered under the singular slug, as WordPress reports it from
+ * /wp-json/wp/v2/types; the site's own listing lives at /leadership-interviews/.
+ */
+const leadershipInterviewPostType: EditorialPostType = {
+  cachePrefix: "leadership-interview",
+  restBase: "leadership-interview"
+};
+
+async function listEditorialPosts(
+  type: EditorialPostType,
   page: number,
   limit: number
 ): Promise<MediaPage<AnalystOpinionItem>> {
   return cached(
-    `analyst-opinions:${page}:${limit}`,
+    `${type.cachePrefix}s:${page}:${limit}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
-      const { posts, total } = await fetchPostType("articles", page, limit, {
+      const { posts, total } = await fetchPostType(type.restBase, page, limit, {
         fields: "id,date_gmt,link,title,excerpt,_links,_embedded"
       });
       return {
@@ -668,16 +693,17 @@ export async function listAnalystOpinions(
   );
 }
 
-export async function getAnalystOpinion(
-  opinionId: string
+async function getEditorialPost(
+  type: EditorialPostType,
+  postId: string
 ): Promise<AnalystOpinionDetail | null> {
-  const wordpressId = opinionId.replace(/^postid-/i, "");
+  const wordpressId = postId.replace(/^postid-/i, "");
   return cached(
-    `analyst-opinion:${wordpressId}`,
+    `${type.cachePrefix}:${wordpressId}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
       const url = new URL(
-        `/wp-json/wp/v2/articles/${encodeURIComponent(wordpressId)}`,
+        `/wp-json/wp/v2/${type.restBase}/${encodeURIComponent(wordpressId)}`,
         config().WORDPRESS_BASE_URL
       );
       url.searchParams.set("_embed", "wp:featuredmedia");
@@ -704,4 +730,42 @@ export async function getAnalystOpinion(
       };
     }
   );
+}
+
+/**
+ * IBSi Views / Analyst Opinions are WordPress `articles` posts. They are free
+ * Insights content, so both the listing and complete article body are public.
+ */
+export async function listAnalystOpinions(
+  page: number,
+  limit: number
+): Promise<MediaPage<AnalystOpinionItem>> {
+  return listEditorialPosts(analystOpinionPostType, page, limit);
+}
+
+export async function getAnalystOpinion(
+  opinionId: string
+): Promise<AnalystOpinionDetail | null> {
+  return getEditorialPost(analystOpinionPostType, opinionId);
+}
+
+/**
+ * Leadership Interviews: IBSi's conversations with banking and FinTech
+ * leaders, a `leadership-interview` post type. Free, like analyst opinions, and
+ * served in the same shape so the app reads both with one parser.
+ */
+export type LeadershipInterviewItem = AnalystOpinionItem;
+export type LeadershipInterviewDetail = AnalystOpinionDetail;
+
+export async function listLeadershipInterviews(
+  page: number,
+  limit: number
+): Promise<MediaPage<LeadershipInterviewItem>> {
+  return listEditorialPosts(leadershipInterviewPostType, page, limit);
+}
+
+export async function getLeadershipInterview(
+  interviewId: string
+): Promise<LeadershipInterviewDetail | null> {
+  return getEditorialPost(leadershipInterviewPostType, interviewId);
 }
