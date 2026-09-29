@@ -1,4 +1,10 @@
 import { query } from "../db/pool.js";
+import {
+  type EntitlementType,
+  type JournalEdition,
+  journalEditions,
+  journalEntitlement
+} from "./catalogue.js";
 
 export type UserRole = "user" | "employee" | "admin" | "super_admin";
 
@@ -18,22 +24,39 @@ export function isAdminRole(role?: string | null): boolean {
   return role === "admin" || role === "super_admin";
 }
 
+const activeEntitlementSql = `e.user_id = $1 AND e.status = 'active'
+  AND e.starts_at <= now() AND (e.ends_at IS NULL OR e.ends_at > now())`;
+
 /**
- * True when the user currently holds premium access, either from a staff role or
- * an active entitlement. Mirrors the test used by the article meter.
+ * The entitlement types this user holds right now. Staff hold all of them by
+ * role. Every gate asks this - "may they read THIS" - rather than whether a
+ * subscription exists, because since the catalogue split a subscription no
+ * longer means the same thing for everyone.
  */
-export async function hasActiveEntitlement(
+export async function activeEntitlements(
   userId: string,
   role?: string | null
+): Promise<Set<EntitlementType>> {
+  if (isStaffRole(role)) return new Set(["insights", "journal_india", "journal_global"]);
+
+  const result = await query<{ entitlement_type: EntitlementType }>(
+    `SELECT DISTINCT e.entitlement_type FROM entitlements e WHERE ${activeEntitlementSql}`,
+    [userId]
+  );
+  return new Set(result.rows.map((row) => row.entitlement_type));
+}
+
+/** True when the user currently holds one specific entitlement, by purchase or by role. */
+export async function hasEntitlement(
+  userId: string,
+  role: string | null | undefined,
+  type: EntitlementType
 ): Promise<boolean> {
   if (isStaffRole(role)) return true;
 
   const result = await query(
-    `SELECT 1 FROM entitlements
-     WHERE user_id = $1 AND status = 'active'
-       AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now())
-     LIMIT 1`,
-    [userId]
+    `SELECT 1 FROM entitlements e WHERE ${activeEntitlementSql} AND e.entitlement_type = $2 LIMIT 1`,
+    [userId, type]
   );
   return Boolean(result.rowCount);
 }
@@ -46,10 +69,8 @@ export async function hasActiveEntitlement(
  */
 const fullArchiveIntervals = ["yearly", "annual"];
 
-export type ArchiveAccess = {
-  /** Whether the user may read the journal archive at all. */
-  hasAccess: boolean;
-  /** Yearly subscribers and staff read every issue ever published. */
+export type EditionAccess = {
+  /** Yearly subscribers and staff read every issue of the edition ever published. */
   fullArchive: boolean;
   /**
    * First issue month a windowed subscriber may read, as `YYYY-MM`, or null
@@ -65,37 +86,48 @@ export type ArchiveAccess = {
   archiveFromMonth: string | null;
 };
 
+export type ArchiveAccess = {
+  /** Whether the user may read the journal archive at all - any edition. */
+  hasAccess: boolean;
+  /** The editions the user holds, each with how deep into it they may read. */
+  editions: Partial<Record<JournalEdition, EditionAccess>>;
+};
+
 /**
- * How deep into the journal archive this user can read.
+ * Which journal editions this user can read, and how deep into each archive.
  *
- * The window start is MIN(first_subscribed_at) across ALL of the user's
- * subscriptions, including lapsed ones, so cancelling and resubscribing keeps
- * the original window instead of restarting it. Access itself still depends on
- * a currently active entitlement - a lapsed subscriber reads nothing, and those
- * dates are kept only so the window survives if they come back.
+ * Depth is per edition: a yearly India plan beside nothing else reads all of
+ * India and none of Global. The window start, where a window applies, is
+ * MIN(archive_from_month) across ALL of the user's subscriptions, including
+ * lapsed ones, so cancelling and resubscribing keeps the original window
+ * instead of restarting it. Access itself still depends on a currently active
+ * entitlement - a lapsed subscriber reads nothing, and those dates are kept
+ * only so the window survives if they come back.
  */
 export async function resolveArchiveAccess(
   userId: string,
   role?: string | null
 ): Promise<ArchiveAccess> {
-  if (isStaffRole(role)) return { hasAccess: true, fullArchive: true, archiveFromMonth: null };
+  const everything: EditionAccess = { fullArchive: true, archiveFromMonth: null };
+  if (isStaffRole(role)) {
+    return { hasAccess: true, editions: { india: everything, global: everything } };
+  }
 
   const result = await query<{
-    has_access: boolean;
+    entitlement_type: EntitlementType;
     full_archive: boolean;
     archive_from_month: string | null;
   }>(
     `WITH active AS (
-       SELECT lower(pl."interval") AS plan_interval
+       SELECT e.entitlement_type, lower(pl."interval") AS plan_interval
        FROM entitlements e
        JOIN subscriptions s ON s.id = e.subscription_id
        JOIN subscription_plans pl ON pl.id = s.local_plan_id
-       WHERE e.user_id = $1 AND e.status = 'active'
-         AND e.starts_at <= now() AND (e.ends_at IS NULL OR e.ends_at > now())
+       WHERE ${activeEntitlementSql} AND e.entitlement_type IN ('journal_india', 'journal_global')
      )
      SELECT
-       EXISTS (SELECT 1 FROM active) AS has_access,
-       EXISTS (SELECT 1 FROM active WHERE plan_interval = ANY($2)) AS full_archive,
+       entitlement_type,
+       bool_or(plan_interval = ANY($2)) AS full_archive,
        -- The frozen window, earliest across all of the user's subscriptions.
        -- Rows predating that column fall back to the month they first
        -- subscribed in, which is exactly how they behaved before it existed.
@@ -105,20 +137,23 @@ export async function resolveArchiveAccess(
        (SELECT min(COALESCE(
                  archive_from_month,
                  to_char(first_subscribed_at AT TIME ZONE 'UTC', 'YYYY-MM')))
-          FROM subscriptions WHERE user_id = $1) AS archive_from_month`,
+          FROM subscriptions WHERE user_id = $1) AS archive_from_month
+     FROM active GROUP BY entitlement_type`,
     [userId, fullArchiveIntervals]
   );
 
-  const row = result.rows[0];
-  if (!row?.has_access) return { hasAccess: false, fullArchive: false, archiveFromMonth: null };
-  if (row.full_archive) return { hasAccess: true, fullArchive: true, archiveFromMonth: null };
+  const editions: ArchiveAccess["editions"] = {};
+  for (const edition of journalEditions) {
+    const row = result.rows.find((candidate) => candidate.entitlement_type === journalEntitlement(edition));
+    if (!row) continue;
+    // A paying subscriber whose start date cannot be resolved is given the
+    // whole archive rather than none of it: that combination means missing
+    // data on our side, and the wrong way to fail is to take content from
+    // someone who paid.
+    editions[edition] = row.full_archive || row.archive_from_month === null
+      ? everything
+      : { fullArchive: false, archiveFromMonth: row.archive_from_month };
+  }
 
-  // A paying subscriber whose start date cannot be resolved is given the whole
-  // archive rather than none of it: that combination means missing data on our
-  // side, and the wrong way to fail is to take content from someone who paid.
-  return {
-    hasAccess: true,
-    fullArchive: row.archive_from_month === null,
-    archiveFromMonth: row.archive_from_month
-  };
+  return { hasAccess: Object.keys(editions).length > 0, editions };
 }

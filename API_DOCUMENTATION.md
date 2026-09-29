@@ -332,11 +332,19 @@ Deletes Firebase identity and cascades local user data. Rejected while a subscri
 
 #### `GET /v1/subscription/plans`
 
-Public. Returns active monthly/yearly plans and their Apple/Google product IDs. Money is stored in the currency's smallest unit.
+Public. Returns the active plans, ordered by product then interval. Three products, each sold monthly and yearly (see `src/lib/catalogue.ts`):
+
+| `product_code` | Grants |
+|---|---|
+| `journal_india` | Unlimited Insights + the IBSi FinTech Journal India edition |
+| `journal_global` | Unlimited Insights + the Global edition |
+| `journal_all` | Unlimited Insights + both editions |
+
+Each plan carries `id`, `code`, `name`, `product_code`, `product_name`, `editions[]`, `interval`, `apple_product_id`, `google_product_id`, and a reference `price_amount` the app never displays (the store quotes the real price). The store product ids are `ibsi_journal_{india|global|all}_{monthly|yearly}` on both stores.
 
 #### `GET /v1/subscription/status` — Private
 
-Returns the newest subscription and whether it currently has an active entitlement.
+Returns the newest subscription (with its plan's `product_code`) and whether it currently has an active entitlement.
 
 #### `POST /v1/subscription/verify-purchase` — Private
 
@@ -362,11 +370,11 @@ iOS body:
 }
 ```
 
-The API never trusts a client-supplied status. It fetches the canonical purchase state from Google or Apple, upserts the subscription, and reconciles premium entitlement. `active`, `trialing`, and `in_grace_period` grant access.
+The API never trusts a client-supplied status. It fetches the canonical purchase state from Google or Apple, upserts the subscription, and writes one `entitlements` row per type the plan's product grants (`insights`, `journal_india`, `journal_global`), closing any type the product does not include. `active`, `trialing`, and `in_grace_period` grant access. Webhooks and the lapsed-subscription refresh re-resolve the plan from the product id the store reports, so a plan change made in the store's own UI is reconciled too.
 
 #### `GET /v1/entitlements/me` — Private
 
-Returns active entitlements and the caller's role. `employee`, `admin`, and `super_admin` receive a synthetic staff entitlement and unlimited access.
+Returns the active entitlement rows, the caller's role, and `access: { insights, journal_editions[] }` — the rows summed up. `employee`, `admin`, and `super_admin` receive synthetic staff rows for every type.
 
 ### Webhooks
 
@@ -490,12 +498,16 @@ Public marketing/about content; cached for 300 seconds.
 
 Query: `page`, `limit`, optional `year`, `edition_type`, and `search`. PDF filenames are never returned.
 
-Each journal carries `locked`, and the response carries
-`archive: { full, from_month }`. Yearly subscribers and staff get
-`full: true` and nothing locked; a monthly subscriber gets `from_month`
-(`YYYY-MM`, the month they first subscribed) and `locked: true` on every
-edition published before it. Locked editions stay in the listing on purpose —
-they are the upgrade prompt.
+Each journal carries `locked` and `locked_reason` (`edition` when the issue's
+edition is not on the reader's plan, `archive` when it predates a monthly
+plan's window, `null` when it opens), and the response carries
+`archive: { editions[], full, from_month }`. An issue's edition is read from
+its `edition_type` by word ("India", "Global"); one naming neither opens for
+any journal subscriber. Yearly subscribers of an edition and staff get
+`full: true` and nothing of that edition locked; a monthly subscriber gets
+`from_month` (`YYYY-MM`, the month they first subscribed) and
+`locked_reason: 'archive'` on every issue published before it. Locked issues
+stay in the listing on purpose — they are the upgrade prompt.
 
 The window is `MIN(subscriptions.archive_from_month)` across all of a user's
 subscriptions, lapsed ones included, so cancelling and resubscribing keeps the
@@ -512,10 +524,11 @@ predating the column fall back to the month of `first_subscribed_at`.
 
 Returns a signed, expiring `view_url`. Response must not be cached.
 
-Enforces the archive window: an edition outside it returns `403`
-`ARCHIVE_UPGRADE_REQUIRED` (distinct from `402` `SUBSCRIPTION_REQUIRED`, which
-means no subscription at all). This is the authoritative check — the `locked`
-flag on the listing is presentation only.
+Enforces both locks: an issue of an edition the plan does not include returns
+`403` `EDITION_UPGRADE_REQUIRED`, one outside the archive window returns `403`
+`ARCHIVE_UPGRADE_REQUIRED` (both distinct from `402` `SUBSCRIPTION_REQUIRED`,
+which means no journal subscription at all). This is the authoritative check —
+the `locked` flag on the listing is presentation only.
 
 #### `GET /v1/journals/view/:token`
 
@@ -684,7 +697,7 @@ This is safer than inventing a fake store subscription.
 Principal tables:
 
 - `app_users`: Firebase-to-application profile mapping and role
-- `subscription_plans`: price, interval, Apple and Google product IDs
+- `subscription_plans`: product_code, interval, Apple and Google product IDs, reference price
 - `subscriptions`: provider purchase state and billing periods
 - `entitlements`: normalized premium access grants
 - `store_events`: idempotent Google/Apple webhook records

@@ -2,7 +2,7 @@ import type { RequestHandler } from "express";
 import { z } from "zod";
 import { query, transaction } from "../db/pool.js";
 import { asyncHandler } from "./async-handler.js";
-import { hasActiveEntitlement, isStaffRole } from "./entitlement.js";
+import { hasEntitlement, isStaffRole } from "./entitlement.js";
 
 /**
  * The free-read meter for the app's Insights tab.
@@ -139,8 +139,12 @@ export async function consumeInsightRead(input: MeterInput): Promise<InsightAcce
     if (input.userId) {
       if (isStaffRole(input.role)) return premium();
 
+      // Every product grants 'insights', so this is "any subscriber" - but
+      // asked by type, so a product without it could be added later without
+      // this silently letting its buyers past the meter.
       const entitlement = await client.query(
         `SELECT 1 FROM entitlements WHERE user_id = $1 AND status = 'active'
+         AND entitlement_type = 'insights'
          AND starts_at <= now() AND (ends_at IS NULL OR ends_at > now()) LIMIT 1`,
         [input.userId]
       );
@@ -195,7 +199,7 @@ export async function consumeInsightRead(input: MeterInput): Promise<InsightAcce
  */
 export async function hasInsightRead(input: MeterInput): Promise<boolean> {
   if (isStaffRole(input.role)) return true;
-  if (input.userId && (await hasActiveEntitlement(input.userId, input.role))) return true;
+  if (input.userId && (await hasEntitlement(input.userId, input.role, "insights"))) return true;
 
   const identityColumn = input.userId ? "user_id" : "installation_id";
   const identityValue = input.userId ?? input.installationId;

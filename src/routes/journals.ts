@@ -7,7 +7,7 @@ import { query } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { type ArchiveAccess, resolveArchiveAccess } from "../lib/entitlement.js";
 import { HttpError } from "../lib/errors.js";
-import { isJournalLocked } from "../lib/journal-archive.js";
+import { journalLockReason } from "../lib/journal-archive.js";
 import { createJournalToken, verifyJournalToken } from "../lib/journal-token.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute } from "../middleware/auth.js";
@@ -49,10 +49,10 @@ const journalParams = z.object({ journal_id: z.string().regex(/^[1-9]\d*$/) });
 const viewParams = z.object({ token: z.string().min(20).max(2048) });
 
 /**
- * Every journal endpoint needs the same two answers: may this user be here at
- * all, and how far back does their plan reach. Returning the window rather than
- * a boolean is what lets the listing mark individual issues without a second
- * lookup per row.
+ * Every journal endpoint needs the same answers: may this user be here at
+ * all, which editions do they hold, and how far back does each reach.
+ * Returning that rather than a boolean is what lets the listing mark
+ * individual issues without a second lookup per row.
  */
 async function requireJournalAccess(
   user: NonNullable<Express.Request["appUser"]>
@@ -62,6 +62,20 @@ async function requireJournalAccess(
     throw new HttpError(402, "An active subscription is required", "SUBSCRIPTION_REQUIRED");
   }
   return access;
+}
+
+/** The window as the app shows it: full only when every held edition is full. */
+function describeArchive(access: ArchiveAccess) {
+  const held = Object.values(access.editions);
+  const windowed = held.filter((edition) => !edition.fullArchive);
+  return {
+    editions: Object.keys(access.editions),
+    full: windowed.length === 0,
+    from_month: windowed
+      .map((edition) => edition.archiveFromMonth)
+      .filter((month): month is string => month !== null)
+      .sort()[0] ?? null
+  };
 }
 
 function journalImageUrl(imagePath: string | null): string | null {
@@ -144,15 +158,22 @@ journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHand
   );
   res.set("Cache-Control", "private, no-store");
   res.json({
-    // Issues outside the reader's window stay in the listing, marked, rather
-    // than being filtered out: a monthly subscriber scrolling a decade of
-    // locked covers is the clearest argument for the annual plan there is.
-    journals: result.rows.map(({ redirect_page: _pdfFilename, ...journal }) => ({
-      ...journal,
-      image_url: journalImageUrl(journal.image_path),
-      locked: isJournalLocked(access, journal.month, journal.year)
-    })),
-    archive: { full: access.fullArchive, from_month: access.archiveFromMonth },
+    // Issues the reader cannot open stay in the listing, marked, rather than
+    // being filtered out: a monthly subscriber scrolling a decade of locked
+    // covers is the clearest argument for the annual plan there is, and an
+    // India subscriber seeing the Global covers is the argument for the
+    // bundle. `locked_reason` says which, so the app can send them to the
+    // right one.
+    journals: result.rows.map(({ redirect_page: _pdfFilename, ...journal }) => {
+      const reason = journalLockReason(access, journal.edition_type, journal.month, journal.year);
+      return {
+        ...journal,
+        image_url: journalImageUrl(journal.image_path),
+        locked: reason !== null,
+        locked_reason: reason
+      };
+    }),
+    archive: describeArchive(access),
     pagination: pagination(page, limit, Number(count.rows[0]?.count ?? 0))
   });
 }));
@@ -160,18 +181,32 @@ journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHand
 journalRouter.post("/:journal_id/view-link", ...privateRoute, validate(journalParams, "params"), asyncHandler(async (req, res) => {
   const access = await requireJournalAccess(req.appUser!);
   const journalId = req.params.journal_id as string;
-  const result = await query<{ journal_id: string; month: string | null; year: string | null }>(
-    "SELECT journal_id, month, year FROM pv_ibsi_journal_data WHERE journal_id = $1 AND redirect_page IS NOT NULL AND btrim(redirect_page) <> ''",
+  const result = await query<{
+    journal_id: string;
+    month: string | null;
+    year: string | null;
+    edition_type: string | null;
+  }>(
+    "SELECT journal_id, month, year, edition_type FROM pv_ibsi_journal_data WHERE journal_id = $1 AND redirect_page IS NOT NULL AND btrim(redirect_page) <> ''",
     [journalId]
   );
   const journal = result.rows[0];
   if (!journal) throw new HttpError(404, "Journal not found", "JOURNAL_NOT_FOUND");
 
-  // The archive window is enforced here, at the point the signed URL is minted,
-  // and not only in the listing above. The listing is presentation; this is the
-  // grant. A client that skipped the list and posted an id straight here would
-  // otherwise walk out with a working link to an issue outside its plan.
-  if (isJournalLocked(access, journal.month, journal.year)) {
+  // Edition and archive window are both enforced here, at the point the
+  // signed URL is minted, and not only in the listing above. The listing is
+  // presentation; this is the grant. A client that skipped the list and
+  // posted an id straight here would otherwise walk out with a working link
+  // to an issue outside its plan.
+  const reason = journalLockReason(access, journal.edition_type, journal.month, journal.year);
+  if (reason === "edition") {
+    throw new HttpError(
+      403,
+      "This edition is not included with your plan",
+      "EDITION_UPGRADE_REQUIRED"
+    );
+  }
+  if (reason === "archive") {
     throw new HttpError(
       403,
       "This edition is included with the annual plan",

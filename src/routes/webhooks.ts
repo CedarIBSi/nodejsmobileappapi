@@ -5,7 +5,7 @@ import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
 import { getGoogleSubscription, verifyPubSubPushToken } from "../services/googlePlay.js";
 import { decodeAppleTransaction, mapAppleStatus, verifyAppleNotification } from "../services/appStore.js";
-import { reconcileStoreSubscription } from "../lib/subscriptionReconcile.js";
+import { planIdForStoreProduct, reconcileStoreSubscription } from "../lib/subscriptionReconcile.js";
 
 // Store webhooks only: Google Play RTDN and Apple App Store server
 // notifications, both verified before anything is written.
@@ -91,7 +91,11 @@ webhookRouter.post("/google-play", asyncHandler(async (req, res) => {
           currentEnd: summary.currentEnd,
           currentStart: summary.currentStart,
           environment: summary.isTestPurchase ? "sandbox" : "production",
-          planId: local.local_plan_id,
+          // The product Play now reports, in case the reader changed plan in
+          // the Play Store rather than in the app; the stored plan otherwise.
+          planId:
+            (await planIdForStoreProduct(client, "google_play", summary.productId)) ??
+            local.local_plan_id,
           provider: "google_play",
           providerSubscriptionId: purchaseToken,
           status: summary.state,
@@ -162,7 +166,11 @@ webhookRouter.post("/apple", asyncHandler(async (req, res) => {
           currentEnd: decodedTransaction?.expiresDate ? new Date(decodedTransaction.expiresDate) : null,
           currentStart: null,
           environment: notification.data.environment === "Production" ? "production" : "sandbox",
-          planId: local.local_plan_id,
+          // Within one subscription group Apple moves a reader between our
+          // products on its own and reports the new product id here.
+          planId:
+            (await planIdForStoreProduct(client, "apple", decodedTransaction?.productId)) ??
+            local.local_plan_id,
           provider: "apple",
           providerSubscriptionId: originalTransactionId,
           status: state,

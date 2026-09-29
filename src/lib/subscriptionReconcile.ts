@@ -1,10 +1,32 @@
 import type { PoolClient } from "pg";
+import { isProductCode, products } from "./catalogue.js";
 import { HttpError } from "./errors.js";
 
 export type StoreProvider = "google_play" | "apple";
 
 /**
- * Statuses that keep the 'premium_news' entitlement granted.
+ * The plan a store product belongs to, by the product id the store reports,
+ * or null when it is none of ours. Any status: a renewal of a retired plan is
+ * still a renewal. Used where a store message carries a product id, so a
+ * reader who moved between products in the store's own UI is reconciled onto
+ * the plan they now pay for rather than the one they first bought.
+ */
+export async function planIdForStoreProduct(
+  client: PoolClient,
+  provider: StoreProvider,
+  productId: string | null | undefined
+): Promise<string | null> {
+  if (!productId) return null;
+  const column = provider === "apple" ? "apple_product_id" : "google_product_id";
+  const result = await client.query<{ id: string }>(
+    `SELECT id FROM subscription_plans WHERE ${column} = $1 LIMIT 1`,
+    [productId]
+  );
+  return result.rows[0]?.id ?? null;
+}
+
+/**
+ * Statuses that keep a subscription's entitlements granted.
  *
  * The two stores spell their states differently and both spellings have to
  * appear here. Google says 'in_grace_period', Apple says 'billing_grace_period'
@@ -200,13 +222,35 @@ export async function reconcileStoreSubscription(
   const subscriptionId = upsertedRow.id;
 
   if (activeStatuses.has(input.status)) {
+    // What this plan's product grants - see src/lib/catalogue.ts. One row per
+    // entitlement type, and any type the row used to carry that the product
+    // does not include is closed: a move from India + Global down to India
+    // must take Global away, and the store tells us about that move only by
+    // naming the new product.
+    const planResult = await client.query<{ product_code: string }>(
+      "SELECT product_code FROM subscription_plans WHERE id = $1",
+      [input.planId]
+    );
+    const productCode = planResult.rows[0]?.product_code;
+    if (!isProductCode(productCode)) {
+      throw new HttpError(500, "Subscription plan has no product", "PLAN_WITHOUT_PRODUCT");
+    }
+    const granted = products[productCode].entitlements;
+
+    for (const entitlementType of granted) {
+      await client.query(
+        `INSERT INTO entitlements
+           (user_id, subscription_id, entitlement_type, status, starts_at, ends_at, source)
+         VALUES ($1, $2, $3, 'active', COALESCE($4, now()), $5, $6)
+         ON CONFLICT (subscription_id, entitlement_type) DO UPDATE SET
+           status = 'active', starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at, updated_at = now()`,
+        [input.userId, subscriptionId, entitlementType, input.currentStart, input.currentEnd, input.provider]
+      );
+    }
     await client.query(
-      `INSERT INTO entitlements
-         (user_id, subscription_id, entitlement_type, status, starts_at, ends_at, source)
-       VALUES ($1, $2, 'premium_news', 'active', COALESCE($3, now()), $4, $5)
-       ON CONFLICT (subscription_id, entitlement_type) DO UPDATE SET
-         status = 'active', starts_at = EXCLUDED.starts_at, ends_at = EXCLUDED.ends_at, updated_at = now()`,
-      [input.userId, subscriptionId, input.currentStart, input.currentEnd, input.provider]
+      `UPDATE entitlements SET status = 'inactive', ends_at = now(), updated_at = now()
+       WHERE subscription_id = $1 AND status = 'active' AND entitlement_type <> ALL($2)`,
+      [subscriptionId, [...granted]]
     );
   } else {
     await client.query(

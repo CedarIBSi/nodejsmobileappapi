@@ -8,6 +8,7 @@ import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { getGoogleSubscription } from "../services/googlePlay.js";
 import { getAppleSubscription } from "../services/appStore.js";
+import { isProductCode, type ProductCode, products } from "../lib/catalogue.js";
 import { reconcileStoreSubscription, type StoreProvider } from "../lib/subscriptionReconcile.js";
 import { refreshLapsedSubscription } from "../lib/subscriptionRefresh.js";
 
@@ -28,21 +29,33 @@ const verifyPurchaseSchema = z.discriminatedUnion("platform", [
 ]);
 
 const statusColumns = `s.id, s.provider, s.status, s.current_start, s.current_end, s.cancelled_at,
-            p.id AS plan_id, p.code AS plan_code, p.name AS plan_name,
+            p.id AS plan_id, p.code AS plan_code, p.name AS plan_name, p.product_code,
             p.apple_product_id, p.google_product_id`;
 
+/** Products in the order the app lists them; within a product, monthly before yearly. */
+const planOrderSql = `ORDER BY array_position(ARRAY['journal_india', 'journal_global', 'journal_all'], product_code),
+            CASE lower("interval") WHEN 'monthly' THEN 0 ELSE 1 END`;
+
 subscriptionRouter.get("/plans", asyncHandler(async (_req, res) => {
-  const result = await query(
+  const result = await query<{ product_code: ProductCode } & Record<string, unknown>>(
     // No tax fields: the stores are the merchant of record and quote their own
     // tax-inclusive price (a Rs 99 base plan bills as Rs 120 in India). The old
     // tax_percent/total_amount pair was Razorpay-era arithmetic that matched
     // neither the stored amount nor the amount actually charged. `price_amount`
     // is a reference figure only - the app displays the store's price.
-    `SELECT id, code, name, price_amount, currency, "interval",
+    `SELECT id, code, name, product_code, price_amount, currency, "interval",
             apple_product_id, google_product_id
-     FROM subscription_plans WHERE status = 'active' ORDER BY price_amount`
+     FROM subscription_plans WHERE status = 'active' ${planOrderSql}`
   );
-  res.json({ plans: result.rows });
+  // The product's name and editions ride with every plan so the app can
+  // group monthly and yearly under one heading without knowing the catalogue.
+  res.json({
+    plans: result.rows.map((plan) => ({
+      ...plan,
+      editions: isProductCode(plan.product_code) ? products[plan.product_code].editions : [],
+      product_name: isProductCode(plan.product_code) ? products[plan.product_code].name : plan.name
+    }))
+  });
 }));
 
 subscriptionRouter.get("/status", ...privateRoute, asyncHandler(async (req, res) => {
@@ -87,6 +100,7 @@ subscriptionRouter.get("/status", ...privateRoute, asyncHandler(async (req, res)
           plan_id: null,
           plan_code: null,
           plan_name: null,
+          product_code: null,
           apple_product_id: null,
           google_product_id: null,
           has_active_entitlement: true

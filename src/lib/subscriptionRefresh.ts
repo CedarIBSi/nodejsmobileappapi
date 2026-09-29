@@ -1,7 +1,11 @@
 import { query, transaction } from "../db/pool.js";
 import { getAppleSubscription } from "../services/appStore.js";
 import { getGoogleSubscription } from "../services/googlePlay.js";
-import { reconcileStoreSubscription, type StoreProvider } from "./subscriptionReconcile.js";
+import {
+  planIdForStoreProduct,
+  reconcileStoreSubscription,
+  type StoreProvider
+} from "./subscriptionReconcile.js";
 
 /**
  * States worth re-asking the store about once the stored period has lapsed.
@@ -125,6 +129,7 @@ export async function refreshLapsedSubscription(userId: string): Promise<boolean
     let currentStart: Date | null = null;
     let currentEnd: Date | null;
     let environment: "sandbox" | "production";
+    let productId: string | null;
 
     if (row.provider === "google_play") {
       const summary = await getGoogleSubscription(row.provider_subscription_id);
@@ -134,6 +139,7 @@ export async function refreshLapsedSubscription(userId: string): Promise<boolean
       currentStart = summary.currentStart;
       currentEnd = summary.currentEnd;
       environment = summary.isTestPurchase ? "sandbox" : "production";
+      productId = summary.productId;
     } else {
       const summary = await getAppleSubscription(row.provider_subscription_id);
       provider = "apple";
@@ -141,15 +147,18 @@ export async function refreshLapsedSubscription(userId: string): Promise<boolean
       status = summary.state;
       currentEnd = summary.currentEnd;
       environment = summary.environment;
+      productId = summary.productId;
     }
 
-    await transaction((client) =>
+    await transaction(async (client) =>
       reconcileStoreSubscription(client, {
         cancelledAt: status === "revoked" || status === "canceled" ? new Date() : null,
         currentEnd,
         currentStart,
         environment,
-        planId: row.local_plan_id,
+        // The product the store reports now, in case the reader changed plan
+        // in the store's own UI; the stored plan otherwise.
+        planId: (await planIdForStoreProduct(client, provider, productId)) ?? row.local_plan_id,
         provider,
         providerSubscriptionId,
         status,

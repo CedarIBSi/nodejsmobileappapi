@@ -1,13 +1,21 @@
-import type { ArchiveAccess } from "./entitlement.js";
+import { type JournalEdition, journalEditionOf } from "./catalogue.js";
+import type { ArchiveAccess, EditionAccess } from "./entitlement.js";
 
 /**
- * Which journal issues a windowed subscriber may open.
+ * Which journal issues a subscriber may open.
+ *
+ * Two things can lock an issue: its edition is not on the reader's plan, or
+ * it predates the window a monthly plan reaches back to. They are told apart
+ * because the remedy differs - a different product for the first, the annual
+ * plan for the second - and the app sends the reader to the right one.
  *
  * The issue date comes from the `month` and `year` the archive already
  * displays, not from `published_date`: the reader is told "September 2026" on
  * the card, so that is what the lock has to agree with. Anything else produces
  * a card that says September and then refuses to open.
  */
+
+export type JournalLockReason = "edition" | "archive";
 
 const monthNumbers = new Map([
   ["january", 1], ["february", 2], ["march", 3], ["april", 4],
@@ -36,20 +44,42 @@ export function journalIssueMonth(
 }
 
 /**
- * True when this issue sits before the reader's archive window and must be
- * shown locked. An issue whose date cannot be read at all is left open: the
- * reader is a paying subscriber, and bad metadata is our problem, not theirs.
- *
- * Both sides are zero-padded `YYYY-MM`, so a string comparison is a date
- * comparison.
+ * The depth the reader has for this issue's edition. An issue whose edition
+ * cannot be read from its metadata is opened with the deepest access the
+ * reader holds on any edition: they are a paying subscriber, and bad metadata
+ * is our problem, not theirs.
  */
-export function isJournalLocked(
+function editionAccessFor(
   access: ArchiveAccess,
+  edition: JournalEdition | null
+): EditionAccess | null {
+  if (edition) return access.editions[edition] ?? null;
+
+  const held = Object.values(access.editions);
+  if (held.length === 0) return null;
+  if (held.some((candidate) => candidate.fullArchive)) {
+    return { fullArchive: true, archiveFromMonth: null };
+  }
+  return held.reduce((deepest, candidate) =>
+    (candidate.archiveFromMonth ?? "") < (deepest.archiveFromMonth ?? "") ? candidate : deepest
+  );
+}
+
+/**
+ * Why this issue is locked for this reader, or null when it opens. Both sides
+ * of the window test are zero-padded `YYYY-MM`, so a string comparison is a
+ * date comparison.
+ */
+export function journalLockReason(
+  access: ArchiveAccess,
+  editionType: string | null | undefined,
   month: string | null | undefined,
   year: string | null | undefined
-): boolean {
-  if (access.fullArchive || !access.archiveFromMonth) return false;
+): JournalLockReason | null {
+  const editionAccess = editionAccessFor(access, journalEditionOf(editionType));
+  if (!editionAccess) return "edition";
+  if (editionAccess.fullArchive || !editionAccess.archiveFromMonth) return null;
   const issueMonth = journalIssueMonth(month, year);
-  if (!issueMonth) return false;
-  return issueMonth < access.archiveFromMonth;
+  if (!issueMonth) return null;
+  return issueMonth < editionAccess.archiveFromMonth ? "archive" : null;
 }
