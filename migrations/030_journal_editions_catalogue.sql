@@ -10,6 +10,12 @@
 -- India + Global above Global above India). Until a product exists in a store
 -- the app shows its price slot as pending and cannot sell it; nothing breaks.
 --
+-- test_ prefix on purpose, as with the first two products: store product ids
+-- can never be deleted or reused, so these throwaways protect the clean
+-- ibsi_journal_* names for launch. A follow-up migration swaps the ids once
+-- the real products are approved; the app picks that up on its next /plans
+-- fetch with no release.
+--
 -- The two old plans are retired, not deleted: existing subscriptions point at
 -- them, and their renewals keep reconciling. Their product_code is
 -- journal_all because that is what they granted.
@@ -24,12 +30,12 @@ UPDATE subscription_plans SET product_code = 'journal_all', status = 'retired', 
 INSERT INTO subscription_plans
   (code, name, product_code, price_amount, currency, "interval", status, apple_product_id, google_product_id)
 VALUES
-  ('journal_india_monthly',  'IBSi Journal India - Monthly',           'journal_india',  9900,   'INR', 'monthly', 'active', 'ibsi_journal_india_monthly',  'ibsi_journal_india_monthly'),
-  ('journal_india_yearly',   'IBSi Journal India - Annual',            'journal_india',  99000,  'INR', 'yearly',  'active', 'ibsi_journal_india_yearly',   'ibsi_journal_india_yearly'),
-  ('journal_global_monthly', 'IBSi Journal Global - Monthly',          'journal_global', 49900,  'INR', 'monthly', 'active', 'ibsi_journal_global_monthly', 'ibsi_journal_global_monthly'),
-  ('journal_global_yearly',  'IBSi Journal Global - Annual',           'journal_global', 499000, 'INR', 'yearly',  'active', 'ibsi_journal_global_yearly',  'ibsi_journal_global_yearly'),
-  ('journal_all_monthly',    'IBSi Journal India + Global - Monthly',  'journal_all',    59900,  'INR', 'monthly', 'active', 'ibsi_journal_all_monthly',    'ibsi_journal_all_monthly'),
-  ('journal_all_yearly',     'IBSi Journal India + Global - Annual',   'journal_all',    599000, 'INR', 'yearly',  'active', 'ibsi_journal_all_yearly',     'ibsi_journal_all_yearly')
+  ('journal_india_monthly',  'IBSi Journal India - Monthly',           'journal_india',  9900,   'INR', 'monthly', 'active', 'test_ibsi_journal_india_monthly',  'test_ibsi_journal_india_monthly'),
+  ('journal_india_yearly',   'IBSi Journal India - Annual',            'journal_india',  99000,  'INR', 'yearly',  'active', 'test_ibsi_journal_india_yearly',   'test_ibsi_journal_india_yearly'),
+  ('journal_global_monthly', 'IBSi Journal Global - Monthly',          'journal_global', 49900,  'INR', 'monthly', 'active', 'test_ibsi_journal_global_monthly', 'test_ibsi_journal_global_monthly'),
+  ('journal_global_yearly',  'IBSi Journal Global - Annual',           'journal_global', 499000, 'INR', 'yearly',  'active', 'test_ibsi_journal_global_yearly',  'test_ibsi_journal_global_yearly'),
+  ('journal_all_monthly',    'IBSi Journal India + Global - Monthly',  'journal_all',    59900,  'INR', 'monthly', 'active', 'test_ibsi_journal_all_monthly',    'test_ibsi_journal_all_monthly'),
+  ('journal_all_yearly',     'IBSi Journal India + Global - Annual',   'journal_all',    599000, 'INR', 'yearly',  'active', 'test_ibsi_journal_all_yearly',     'test_ibsi_journal_all_yearly')
 ON CONFLICT (code) DO NOTHING;
 
 ALTER TABLE subscription_plans
