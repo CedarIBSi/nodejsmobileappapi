@@ -288,9 +288,10 @@ function toPodcast(post: WordPressPost): PodcastItem {
     episode_number: episodeNumber,
     id: post.id,
     image_url: featuredImage(post),
-    // Free since podcasts moved to the app's Insights tab. Kept in the payload
+    // Metered Insights content: the listing withholds audio_url and the
+    // detail route serves it after the free-read check. Kept in the payload
     // so existing consumers do not break on a missing field; nothing reads it.
-    is_premium: false,
+    is_premium: true,
     link: post.link ?? "",
     published_at: toIsoTimestamp(post.date_gmt),
     title: toText(post.title?.rendered)
@@ -320,24 +321,6 @@ async function resolveYoutubeId(post: WordPressPost): Promise<string | null> {
       return null;
     }
   });
-}
-
-/** Bounded concurrency keeps a page of videos from opening 50 sockets at once. */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  work: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      results[index] = await work(items[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return results;
 }
 
 function videoDescription(post: WordPressPost): string | null {
@@ -620,21 +603,68 @@ export async function listPodcasts(page: number, limit: number): Promise<MediaPa
 // outbound requests to WordPress are blocked by Cloudflare bot protection.
 // See src/lib/galaxy-content.ts and src/services/galaxyContent.ts.
 
+function toVideo(post: WordPressPost, youtubeId: string | null): VideoItem {
+  return {
+    description: videoDescription(post),
+    id: post.id,
+    image_url: featuredImage(post),
+    // Metered, as with podcasts above.
+    is_premium: true,
+    link: post.link ?? "",
+    published_at: toIsoTimestamp(post.date_gmt),
+    title: toText(post.title?.rendered),
+    youtube_id: youtubeId
+  };
+}
+
+/**
+ * No YouTube id on the listing. Resolving one costs a permalink fetch per
+ * video, and the listing never shows it now that playback is metered: the
+ * reader opens one video, and getVideo resolves that one.
+ */
 export async function listVideos(page: number, limit: number): Promise<MediaPage<VideoItem>> {
   return cached(`videos:${page}:${limit}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
     const { posts, total } = await fetchPostType("videos", page, limit);
-    const items = await mapWithConcurrency(posts, 6, async (post) => ({
-      description: videoDescription(post),
-      id: post.id,
-      image_url: featuredImage(post),
-      // Free, as with podcasts above.
-      is_premium: false,
-      link: post.link ?? "",
-      published_at: toIsoTimestamp(post.date_gmt),
-      title: toText(post.title?.rendered),
-      youtube_id: await resolveYoutubeId(post)
-    }));
-    return { items, total };
+    return { items: posts.map((post) => toVideo(post, null)), total };
+  });
+}
+
+/**
+ * One post by id, with the same fields the listings read. A WordPress 404
+ * surfaces from wordPressRequest as a 502, which is wrong for "no such post";
+ * the callers below turn a missing id into null and the route into a 404.
+ */
+async function fetchPost(restBase: string, postId: string): Promise<WordPressPost | null> {
+  const url = new URL(
+    `/wp-json/wp/v2/${restBase}/${encodeURIComponent(postId)}`,
+    config().WORDPRESS_BASE_URL
+  );
+  url.searchParams.set("_embed", "wp:featuredmedia");
+  url.searchParams.set("_fields", listFields);
+
+  try {
+    const response = await wordPressRequest(url, "application/json");
+    const post = (await response.json()) as WordPressPost;
+    return post?.id ? post : null;
+  } catch (error) {
+    if (error instanceof HttpError && /returned 404 /.test(error.message)) return null;
+    throw error;
+  }
+}
+
+/** The one podcast the reader opened, audio URL included. */
+export async function getPodcast(podcastId: string): Promise<PodcastItem | null> {
+  return cached(`podcast:${podcastId}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const post = await fetchPost("podcasts", podcastId);
+    return post ? toPodcast(post) : null;
+  });
+}
+
+/** The one video the reader opened, YouTube id resolved. */
+export async function getVideo(videoId: string): Promise<VideoItem | null> {
+  return cached(`video:${videoId}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const post = await fetchPost("videos", videoId);
+    return post ? toVideo(post, await resolveYoutubeId(post)) : null;
   });
 }
 

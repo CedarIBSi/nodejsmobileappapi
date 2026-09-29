@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
+import { meteredCallerSchema, meteredInsight } from "../lib/insight-meter.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -12,8 +13,10 @@ import {
 
 /**
  * Leadership Interviews sit beside Analyst Opinions on the app's Insights tab
- * and are served the same way: free to anyone, cached for a few minutes, and
- * addressable by either the bare WordPress id or the app's `postid-` form.
+ * and are served the same way: a public, cached listing, and a body that
+ * counts against the reader's five free Insights reads a month - spent by
+ * POST /v1/insights/access, checked here. Addressable by either the bare
+ * WordPress id or the app's `postid-` form.
  */
 export const leadershipInterviewRouter = Router();
 const publicCacheSeconds = 300;
@@ -40,6 +43,8 @@ leadershipInterviewRouter.get(
   "/:interview_id",
   resolveOptionalUser,
   validate(interviewParams, "params"),
+  validate(meteredCallerSchema, "query"),
+  meteredInsight("leadership_interview", "interview_id"),
   asyncHandler(async (req, res) => {
     const { interview_id: interviewId } = req.params as { interview_id: string };
     const interview = await getLeadershipInterview(interviewId);
@@ -50,7 +55,8 @@ leadershipInterviewRouter.get(
         "LEADERSHIP_INTERVIEW_NOT_FOUND"
       );
     }
-    res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
+    // The answer depends on who asked, so it must not be shared by an edge.
+    res.set("Cache-Control", "private, no-store");
     res.json({ leadership_interview: interview });
   })
 );

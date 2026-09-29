@@ -250,7 +250,7 @@ Common status codes:
 | `206` | Partial PDF response |
 | `400` | Invalid body/query/path parameter |
 | `401` | Missing, invalid, expired, or revoked token |
-| `402` | Subscription or free-article limit required |
+| `402` | Subscription required, or the free Insights allowance is spent |
 | `403` | Authenticated but not authorized |
 | `404` | Resource, synced user, or endpoint not found |
 | `409` | Account cannot be deleted while subscription is active |
@@ -402,37 +402,7 @@ Public. Returns `{ categories }`, cached for 300 seconds.
 
 #### `GET /v1/news/articles/:news_article_id`
 
-Public article body lookup. Returns `{ article: { id, body } }`.
-
-#### `POST /v1/news/access`
-
-Optional Firebase token. Anonymous callers must supply a persistent installation UUID:
-
-```json
-{
-  "news_article_id": "12345",
-  "installation_id": "7d84c40c-cf72-4b5e-9db5-eb0923a84680"
-}
-```
-
-Users receive five unique free articles per calendar month in `Asia/Kolkata`. Reopening an article does not consume another view. When a caller signs in, the current installation's usage is merged into the account. Premium and staff users bypass the meter.
-
-Successful/denied shape:
-
-```json
-{
-  "access": {
-    "allowed": true,
-    "reason": "free",
-    "remaining_free_articles": 4,
-    "period_timezone": "Asia/Kolkata",
-    "requires_authentication": false,
-    "requires_subscription": false
-  }
-}
-```
-
-The sixth new free article returns `402`.
+Public article body lookup, cached for 300 seconds. Returns `{ article: { id, body, body_html } }`. News is free: there is no meter on articles. (`POST /v1/news/access` has been removed; the meter now lives on Insights content, below.)
 
 #### Reading history — Private
 
@@ -445,15 +415,70 @@ The sixth new free article returns `402`.
 - `GET /v1/news/saved-articles?page=1&limit=20`
 - `DELETE /v1/news/saved-articles/:news_article_id`
 
+### Insights meter
+
+Everything on the app's Insights tab - analyst opinions, leadership interviews, white papers, podcasts and videos - shares one free allowance: **five distinct items per calendar month** in `Asia/Kolkata`, counted per signed-in user or, before sign-in, per installation. Reopening an item already read this month is free. When a caller signs in, the installation's reads for the month are merged into the account. Premium and staff users bypass the meter.
+
+Listings for all five types are open to anyone. The thing the allowance buys - an article body, a signed PDF link, an audio URL, a YouTube id - is served only after a read has been spent on that item.
+
+#### `POST /v1/insights/access`
+
+Optional Firebase token. Anonymous callers must supply a persistent installation UUID. This is the only call that spends a read; the app makes it before opening an item.
+
+```json
+{
+  "content_type": "analyst_opinion",
+  "content_id": "12345",
+  "installation_id": "7d84c40c-cf72-4b5e-9db5-eb0923a84680"
+}
+```
+
+`content_type` is one of `analyst_opinion`, `leadership_interview`, `whitepaper`, `podcast`, `video`. Editorial ids may be given as `12345` or `postid-12345`; both count as the same item.
+
+Allowed/denied shape:
+
+```json
+{
+  "access": {
+    "allowed": true,
+    "reason": "free",
+    "remaining_free_reads": 4,
+    "period_timezone": "Asia/Kolkata",
+    "requires_authentication": false,
+    "requires_subscription": false
+  }
+}
+```
+
+`reason` is `free`, `premium`, or `monthly_limit_reached`. The sixth new item in a month returns `402` with `allowed: false`.
+
+#### Metered content routes
+
+Each of the routes below checks that a read was spent on the item (or that the caller is premium/staff) and otherwise answers `402` with the same `{ access }` envelope. Signed-out callers pass the installation id that spent the read: as `?installation_id=` on a GET, or `{ "installation_id" }` in the body of a POST.
+
+- `GET /v1/analyst-opinions/:opinion_id`
+- `GET /v1/leadership-interviews/:interview_id`
+- `POST /v1/whitepapers/:whitepaper_id/view-link`
+- `GET /v1/podcasts/:podcast_id`
+- `GET /v1/videos/:video_id`
+
 ### Podcasts and videos
 
 #### `GET /v1/podcasts`
 
-Optional Firebase token; query `page` and `limit`. Metadata is public. `audio_url` is `null` without premium/staff access.
+Optional Firebase token; query `page` and `limit`. Metadata is public; `audio_url` is always `null` on the listing.
+
+#### `GET /v1/podcasts/:podcast_id` — Metered
+
+Returns `{ podcast }` with `audio_url` populated. See the Insights meter above.
 
 #### `GET /v1/videos`
 
-Optional Firebase token; query `page` and `limit`. Metadata is public. `youtube_id` is `null` without premium/staff access.
+Optional Firebase token; query `page` and `limit`. Metadata is public; `youtube_id` is always `null` on the listing.
+
+#### `GET /v1/videos/:video_id` — Metered
+
+Returns `{ video }` with `youtube_id` resolved. See the Insights meter above.
 
 ### Journals
 
@@ -498,13 +523,13 @@ Serves the PDF inline. Supports `Range: bytes=...`, returning `206` or `416`. Th
 
 ### White papers
 
-#### `GET /v1/whitepapers` — Private + premium/staff
+#### `GET /v1/whitepapers`
 
-Query: `page`, `limit`, optional `year`, `category`, and `search`. Only rows with `live_status = Live` and a PDF filename are listed.
+Optional Firebase token. Query: `page`, `limit`, optional `year`, `category`, and `search`. Only rows with `live_status = Live` and a PDF filename are listed.
 
-#### `POST /v1/whitepapers/:whitepaper_id/view-link` — Private + premium/staff
+#### `POST /v1/whitepapers/:whitepaper_id/view-link` — Metered
 
-Returns a signed, expiring `view_url`.
+Returns a signed, expiring `view_url`. Optional body `{ "installation_id" }` for signed-out callers. See the Insights meter above.
 
 #### `GET /v1/whitepapers/view/:token`
 
@@ -541,15 +566,16 @@ All four public content endpoints use a 300-second cache window.
 
 ### Analyst opinions
 
-Analyst Opinions (the WordPress **IBSi Views** article collection) are free
-Insights content. Neither endpoint requires sign-in or a subscription.
+Analyst Opinions (the WordPress **IBSi Views** article collection) are
+Insights content. The listing is public; the body is metered (see the Insights
+meter above).
 
 #### `GET /v1/analyst-opinions?page=1&limit=20`
 
 Returns `analyst_opinions[]` with `id`, `title`, `excerpt`, `image_url`,
 `published_at`, and `link`, plus the standard pagination object.
 
-#### `GET /v1/analyst-opinions/:opinion_id`
+#### `GET /v1/analyst-opinions/:opinion_id` — Metered
 
 Returns the selected item as `analyst_opinion`, including the listing fields
 and its complete `body` (plain text) and `body_html` (rich content). Both a
@@ -558,16 +584,15 @@ numeric WordPress ID and the app's `postid-123` form are accepted.
 ### Leadership interviews
 
 Leadership Interviews (the WordPress `leadership-interview` post type, listed
-on the site at `/leadership-interviews/`) are free Insights content served in
-the same shape as analyst opinions. Neither endpoint requires sign-in or a
-subscription.
+on the site at `/leadership-interviews/`) are Insights content served in the
+same shape as analyst opinions: public listing, metered body.
 
 #### `GET /v1/leadership-interviews?page=1&limit=20`
 
 Returns `leadership_interviews[]` with `id`, `title`, `excerpt`, `image_url`,
 `published_at`, and `link`, plus the standard pagination object.
 
-#### `GET /v1/leadership-interviews/:interview_id`
+#### `GET /v1/leadership-interviews/:interview_id` — Metered
 
 Returns the selected item as `leadership_interview`, including the listing
 fields and its complete `body` (plain text) and `body_html` (rich content).
