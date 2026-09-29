@@ -340,7 +340,7 @@ Public. Returns the active plans, ordered by product then interval. Three produc
 | `journal_global` | Unlimited Insights + the Global edition |
 | `journal_all` | Unlimited Insights + both editions |
 
-Each plan carries `id`, `code`, `name`, `product_code`, `product_name`, `editions[]`, `interval`, `apple_product_id`, `google_product_id`, and a reference `price_amount` the app never displays (the store quotes the real price). The store product ids are `ibsi_journal_{india|global|all}_{monthly|yearly}` on both stores.
+Each plan carries `id`, `code`, `name`, `product_code`, `product_name`, `editions[]`, `interval`, `apple_product_id`, `google_product_id`, and a reference `price_amount` the app never displays (the store quotes the real price). The store product ids are `test_ibsi_journal_{india|global|all}_{monthly|yearly}` on both stores for now; a follow-up migration swaps in the final `ibsi_journal_*` ids once the real products are approved (product ids are permanent, so the test ones are throwaways).
 
 #### `GET /v1/subscription/status` — Private
 
