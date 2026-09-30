@@ -487,6 +487,18 @@ Optional Firebase token; query `page` and `limit`. Metadata is public; `youtube_
 
 Returns `{ video }` with `youtube_id` resolved. See the Insights meter above.
 
+### Webinars
+
+Free to watch: nothing here is metered or gated. Read from the `webinars` WordPress post type, in the same shape as videos with `is_premium: false`.
+
+#### `GET /v1/webinars`
+
+Optional Firebase token. Query: `page`, `limit`. Rows carry `youtube_id: null`; the detail resolves it.
+
+#### `GET /v1/webinars/:webinar_id`
+
+Optional Firebase token. One webinar with `youtube_id` resolved from its permalink. `404` with `WEBINAR_NOT_FOUND` for an unknown id.
+
 ### Journals
 
 #### `GET /v1/journals/about`

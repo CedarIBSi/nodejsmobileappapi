@@ -669,6 +669,34 @@ export async function getVideo(videoId: string): Promise<VideoItem | null> {
 }
 
 /**
+ * Webinars: the `webinars` post type, a YouTube embed behind a featured image
+ * exactly like a video, so they share the video shape. Free to watch, hence
+ * `is_premium: false` - the app reads that flag, and nothing meters them.
+ *
+ * The listing still omits the YouTube id, for cost rather than access:
+ * resolving one is a permalink fetch per row, and only the webinar the reader
+ * opens needs it. getWebinar resolves that one.
+ */
+function toWebinar(post: WordPressPost, youtubeId: string | null): VideoItem {
+  return { ...toVideo(post, youtubeId), is_premium: false };
+}
+
+export async function listWebinars(page: number, limit: number): Promise<MediaPage<VideoItem>> {
+  return cached(`webinars:${page}:${limit}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const { posts, total } = await fetchPostType("webinars", page, limit);
+    return { items: posts.map((post) => toWebinar(post, null)), total };
+  });
+}
+
+/** The one webinar the reader opened, YouTube id resolved. */
+export async function getWebinar(webinarId: string): Promise<VideoItem | null> {
+  return cached(`webinar:${webinarId}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const post = await fetchPost("webinars", webinarId);
+    return post ? toWebinar(post, await resolveYoutubeId(post)) : null;
+  });
+}
+
+/**
  * The free editorial collections - Analyst Opinions and Leadership Interviews -
  * are each a WordPress post type with the same shape: a title, an excerpt, a
  * featured image and a body. They differ only in the REST base they live under,

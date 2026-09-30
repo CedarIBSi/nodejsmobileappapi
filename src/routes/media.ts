@@ -6,14 +6,23 @@ import { meteredCallerSchema, meteredInsight } from "../lib/insight-meter.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { getPodcast, getVideo, listPodcasts, listVideos } from "../services/wordpress.js";
+import {
+  getPodcast,
+  getVideo,
+  getWebinar,
+  listPodcasts,
+  listVideos,
+  listWebinars
+} from "../services/wordpress.js";
 
 export const podcastRouter = Router();
 export const videoRouter = Router();
+export const webinarRouter = Router();
 
 const listRoute = [resolveOptionalUser, validate(paginationSchema, "query")];
 const podcastParams = z.object({ podcast_id: z.string().regex(/^\d+$/).max(20) });
 const videoParams = z.object({ video_id: z.string().regex(/^\d+$/).max(20) });
+const webinarParams = z.object({ webinar_id: z.string().regex(/^\d+$/).max(20) });
 
 function requestedPage(req: { query: unknown }) {
   return req.query as unknown as { page: number; limit: number };
@@ -84,5 +93,36 @@ videoRouter.get(
     if (!video) throw new HttpError(404, "Video not found", "VIDEO_NOT_FOUND");
     res.set("Cache-Control", "private, no-store");
     res.json({ video });
+  })
+);
+
+/**
+ * Webinars are free, so neither route here is metered: the listing is open
+ * and the detail hands over the YouTube id to anyone who asks. The split into
+ * list and detail is kept anyway, because resolving the id costs a permalink
+ * fetch per webinar and the listing should not pay that for every row.
+ */
+webinarRouter.get(
+  "/",
+  ...listRoute,
+  asyncHandler(async (req, res) => {
+    const { page, limit } = requestedPage(req);
+    const { items, total } = await listWebinars(page, limit);
+    res.json({
+      webinars: items,
+      pagination: pagination(page, limit, total)
+    });
+  })
+);
+
+webinarRouter.get(
+  "/:webinar_id",
+  resolveOptionalUser,
+  validate(webinarParams, "params"),
+  asyncHandler(async (req, res) => {
+    const { webinar_id: webinarId } = req.params as { webinar_id: string };
+    const webinar = await getWebinar(webinarId);
+    if (!webinar) throw new HttpError(404, "Webinar not found", "WEBINAR_NOT_FOUND");
+    res.json({ webinar });
   })
 );
