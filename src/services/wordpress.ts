@@ -739,7 +739,9 @@ const blogPostType: EditorialPostType = {
 
 const caseStudyPostType: EditorialPostType = {
   cachePrefix: "case-study",
-  restBase: "case-studies"
+  // WordPress registers the post type under the singular `casestudy` base;
+  // `/case-studies/` is only the public archive page URL.
+  restBase: "casestudy"
 };
 
 async function listEditorialPosts(
