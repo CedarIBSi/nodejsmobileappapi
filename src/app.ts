@@ -23,6 +23,7 @@ import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
 import { notificationRouter } from "./routes/notifications.js";
 import { analystOpinionRouter } from "./routes/analyst-opinions.js";
+import { caseStudyRouter } from "./routes/case-studies.js";
 import { leadershipInterviewRouter } from "./routes/leadership-interviews.js";
 import { insightRouter } from "./routes/insights.js";
 import { authActionRouter } from "./routes/auth-action.js";
@@ -134,6 +135,7 @@ export function createApp() {
   app.use("/v1/webinars", webinarRouter);
   app.use("/v1/blogs", blogRouter);
   app.use("/v1/analyst-opinions", analystOpinionRouter);
+  app.use("/v1/case-studies", caseStudyRouter);
   app.use("/v1/leadership-interviews", leadershipInterviewRouter);
   app.use("/v1/insights", insightRouter);
   app.use(notFound);

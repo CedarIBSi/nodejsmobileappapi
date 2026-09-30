@@ -7,7 +7,7 @@ import { hasEntitlement, isStaffRole } from "./entitlement.js";
 /**
  * The free-read meter on IBSi's editorial programming.
  *
- * Analyst opinions, leadership interviews, podcasts and videos share one
+ * Analyst opinions, case studies, leadership interviews, podcasts and videos share one
  * allowance: five distinct items per calendar month, counted in Asia/Kolkata,
  * per signed-in user or, before sign-in, per installation. Premium
  * subscribers and staff are never metered. White papers were on the meter
@@ -24,6 +24,7 @@ import { hasEntitlement, isStaffRole } from "./entitlement.js";
  */
 export const insightContentTypes = [
   "analyst_opinion",
+  "case_study",
   "leadership_interview",
   "podcast",
   "video"

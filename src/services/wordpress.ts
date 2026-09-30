@@ -54,6 +54,8 @@ export type AnalystOpinionDetail = AnalystOpinionItem & {
 
 export type BlogItem = AnalystOpinionItem;
 export type BlogDetail = AnalystOpinionDetail;
+export type CaseStudyItem = AnalystOpinionItem;
+export type CaseStudyDetail = AnalystOpinionDetail;
 
 export type MediaPage<T> = { items: T[]; total: number };
 
@@ -735,6 +737,11 @@ const blogPostType: EditorialPostType = {
   restBase: "blogs"
 };
 
+const caseStudyPostType: EditorialPostType = {
+  cachePrefix: "case-study",
+  restBase: "case-studies"
+};
+
 async function listEditorialPosts(
   type: EditorialPostType,
   page: number,
@@ -853,4 +860,19 @@ export async function listBlogs(page: number, limit: number): Promise<MediaPage<
 
 export async function getBlog(blogId: string): Promise<BlogDetail | null> {
   return getEditorialPost(blogPostType, blogId);
+}
+
+/**
+ * Case Studies are premium Insights content. The listing is public, while the
+ * detail body is served only after the shared Insights meter grants access.
+ */
+export async function listCaseStudies(
+  page: number,
+  limit: number
+): Promise<MediaPage<CaseStudyItem>> {
+  return listEditorialPosts(caseStudyPostType, page, limit);
+}
+
+export async function getCaseStudy(caseStudyId: string): Promise<CaseStudyDetail | null> {
+  return getEditorialPost(caseStudyPostType, caseStudyId);
 }

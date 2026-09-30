@@ -425,9 +425,9 @@ Public article body lookup, cached for 300 seconds. Returns `{ article: { id, bo
 
 ### Insights meter
 
-Analyst opinions, leadership interviews, podcasts and videos share one free allowance: **five distinct items per calendar month** in `Asia/Kolkata`, counted per signed-in user or, before sign-in, per installation. Reopening an item already read this month is free. When a caller signs in, the installation's reads for the month are merged into the account. Premium and staff users bypass the meter. White papers are not metered: they are free to read, and `whitepaper` is rejected as a `content_type` since 2026-09-30.
+Analyst opinions, case studies, leadership interviews, podcasts and videos share one free allowance: **five distinct items per calendar month** in `Asia/Kolkata`, counted per signed-in user or, before sign-in, per installation. Reopening an item already read this month is free. When a caller signs in, the installation's reads for the month are merged into the account. Premium and staff users bypass the meter. White papers are not metered: they are free to read, and `whitepaper` is rejected as a `content_type` since 2026-09-30.
 
-Listings for all four types are open to anyone. The thing the allowance buys - an article body, an audio URL, a YouTube id - is served only after a read has been spent on that item.
+Listings for all five types are open to anyone. The thing the allowance buys - an article body, an audio URL, or a YouTube id - is served only after a read has been spent on that item.
 
 #### `POST /v1/insights/access`
 
@@ -441,7 +441,7 @@ Optional Firebase token. Anonymous callers must supply a persistent installation
 }
 ```
 
-`content_type` is one of `analyst_opinion`, `leadership_interview`, `podcast`, `video`. Editorial ids may be given as `12345` or `postid-12345`; both count as the same item.
+`content_type` is one of `analyst_opinion`, `case_study`, `leadership_interview`, `podcast`, `video`. Editorial ids may be given as `12345` or `postid-12345`; both count as the same item.
 
 Allowed/denied shape:
 
@@ -465,6 +465,7 @@ Allowed/denied shape:
 Each of the routes below checks that a read was spent on the item (or that the caller is premium/staff) and otherwise answers `402` with the same `{ access }` envelope. Signed-out callers pass the installation id that spent the read: as `?installation_id=` on a GET, or `{ "installation_id" }` in the body of a POST.
 
 - `GET /v1/analyst-opinions/:opinion_id`
+- `GET /v1/case-studies/:case_study_id`
 - `GET /v1/leadership-interviews/:interview_id`
 - `GET /v1/podcasts/:podcast_id`
 - `GET /v1/videos/:video_id`
@@ -510,6 +511,18 @@ Optional Firebase token. Query: `page`, `limit`. Returns only blogs from the rol
 #### `GET /v1/blogs/:blog_id`
 
 Optional Firebase token. Returns the selected blog as `blog`, including `body` (plain text) and `body_html` (rich content). `404` with `BLOG_NOT_FOUND` for an unknown id.
+
+### Case studies
+
+Case Studies are Insights content. The listing is public; the body is metered through the shared Insights meter.
+
+#### `GET /v1/case-studies?page=1&limit=20`
+
+Returns `case_studies[]` with `id`, `title`, `excerpt`, `image_url`, `published_at`, and `link`, plus the standard pagination object.
+
+#### `GET /v1/case-studies/:case_study_id` — Metered
+
+Returns the selected item as `case_study`, including the listing fields and its complete `body` (plain text) and `body_html` (rich content). Both a numeric WordPress ID and the app's `postid-123` form are accepted. `404` with `CASE_STUDY_NOT_FOUND` for an unknown id.
 
 ### Journals
 
