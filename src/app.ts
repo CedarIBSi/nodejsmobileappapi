@@ -7,7 +7,7 @@ import { config } from "./config.js";
 import { authRouter } from "./routes/auth.js";
 import { entitlementRouter } from "./routes/entitlements.js";
 import { healthRouter } from "./routes/health.js";
-import { podcastRouter, videoRouter, webinarRouter } from "./routes/media.js";
+import { blogRouter, podcastRouter, videoRouter, webinarRouter } from "./routes/media.js";
 import { newsRouter } from "./routes/news.js";
 import { advisoryRouter } from "./routes/advisory.js";
 import { researchReportsRouter } from "./routes/research-reports.js";
@@ -132,6 +132,7 @@ export function createApp() {
   app.use("/v1/podcasts", podcastRouter);
   app.use("/v1/videos", videoRouter);
   app.use("/v1/webinars", webinarRouter);
+  app.use("/v1/blogs", blogRouter);
   app.use("/v1/analyst-opinions", analystOpinionRouter);
   app.use("/v1/leadership-interviews", leadershipInterviewRouter);
   app.use("/v1/insights", insightRouter);

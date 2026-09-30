@@ -7,9 +7,11 @@ import { pagination, paginationSchema } from "../lib/pagination.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import {
+  getBlog,
   getPodcast,
   getVideo,
   getWebinar,
+  listBlogs,
   listPodcasts,
   listVideos,
   listWebinars
@@ -18,11 +20,13 @@ import {
 export const podcastRouter = Router();
 export const videoRouter = Router();
 export const webinarRouter = Router();
+export const blogRouter = Router();
 
 const listRoute = [resolveOptionalUser, validate(paginationSchema, "query")];
 const podcastParams = z.object({ podcast_id: z.string().regex(/^\d+$/).max(20) });
 const videoParams = z.object({ video_id: z.string().regex(/^\d+$/).max(20) });
 const webinarParams = z.object({ webinar_id: z.string().regex(/^\d+$/).max(20) });
+const blogParams = z.object({ blog_id: z.string().regex(/^\d+$/).max(20) });
 
 function requestedPage(req: { query: unknown }) {
   return req.query as unknown as { page: number; limit: number };
@@ -124,5 +128,31 @@ webinarRouter.get(
     const webinar = await getWebinar(webinarId);
     if (!webinar) throw new HttpError(404, "Webinar not found", "WEBINAR_NOT_FOUND");
     res.json({ webinar });
+  })
+);
+
+/** Blogs are free editorial posts, listed and read without the Insights meter. */
+blogRouter.get(
+  "/",
+  ...listRoute,
+  asyncHandler(async (req, res) => {
+    const { page, limit } = requestedPage(req);
+    const { items, total } = await listBlogs(page, limit);
+    res.json({
+      blogs: items,
+      pagination: pagination(page, limit, total)
+    });
+  })
+);
+
+blogRouter.get(
+  "/:blog_id",
+  resolveOptionalUser,
+  validate(blogParams, "params"),
+  asyncHandler(async (req, res) => {
+    const { blog_id: blogId } = req.params as { blog_id: string };
+    const blog = await getBlog(blogId);
+    if (!blog) throw new HttpError(404, "Blog not found", "BLOG_NOT_FOUND");
+    res.json({ blog });
   })
 );

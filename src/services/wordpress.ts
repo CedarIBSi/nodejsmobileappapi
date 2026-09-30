@@ -52,6 +52,9 @@ export type AnalystOpinionDetail = AnalystOpinionItem & {
   body_html: string | null;
 };
 
+export type BlogItem = AnalystOpinionItem;
+export type BlogDetail = AnalystOpinionDetail;
+
 export type MediaPage<T> = { items: T[]; total: number };
 
 type EmbeddedMedia = {
@@ -351,8 +354,8 @@ export type NewsCategoryItem = {
  */
 const newsListFields = "id,date_gmt,link,title,excerpt,_links,_embedded";
 
-/** Start of the rolling news window, as WordPress-compatible ISO 8601. */
-function newsWindowStart(months: number): string {
+/** Start of a rolling content window, as WordPress-compatible ISO 8601. */
+function contentWindowStart(months: number): string {
   const start = new Date();
   start.setMonth(start.getMonth() - months);
   return start.toISOString().slice(0, 19);
@@ -369,7 +372,7 @@ export async function listNews(
   const key = `news:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
 
   return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
-    const params: Record<string, string> = { after: newsWindowStart(months) };
+    const params: Record<string, string> = { after: contentWindowStart(months) };
     if (categoryId) params.categories = String(categoryId);
     // Comma-separated tag ids are OR in the WordPress REST API, which is what
     // a region needs: any one of its spellings counts as a match.
@@ -475,7 +478,7 @@ export type NewsRegionItem = {
 
 export async function listNewsRegions(): Promise<NewsRegionItem[]> {
   return cached("news:regions", config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
-    const after = newsWindowStart(config().NEWS_WINDOW_MONTHS);
+    const after = contentWindowStart(config().NEWS_WINDOW_MONTHS);
     const items: NewsRegionItem[] = [];
 
     // Sequential, not Promise.all. Seven simultaneous requests is exactly the
@@ -706,6 +709,8 @@ export async function getWebinar(webinarId: string): Promise<VideoItem | null> {
 type EditorialPostType = {
   /** Prefix for cache keys. Must differ per post type. */
   cachePrefix: string;
+  /** Optional rolling listing window. Detail links remain addressable by id. */
+  listWindowMonths?: number;
   /** The `rest_base` WordPress registered for the post type. */
   restBase: string;
 };
@@ -724,6 +729,12 @@ const leadershipInterviewPostType: EditorialPostType = {
   restBase: "leadership-interview"
 };
 
+const blogPostType: EditorialPostType = {
+  cachePrefix: "blog",
+  listWindowMonths: 6,
+  restBase: "blogs"
+};
+
 async function listEditorialPosts(
   type: EditorialPostType,
   page: number,
@@ -734,7 +745,10 @@ async function listEditorialPosts(
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
       const { posts, total } = await fetchPostType(type.restBase, page, limit, {
-        fields: "id,date_gmt,link,title,excerpt,_links,_embedded"
+        fields: "id,date_gmt,link,title,excerpt,_links,_embedded",
+        params: type.listWindowMonths
+          ? { after: contentWindowStart(type.listWindowMonths) }
+          : undefined
       });
       return {
         items: posts.map((post) => ({
@@ -826,4 +840,17 @@ export async function getLeadershipInterview(
   interviewId: string
 ): Promise<LeadershipInterviewDetail | null> {
   return getEditorialPost(leadershipInterviewPostType, interviewId);
+}
+
+/**
+ * Blogs are free editorial posts under the site's `/blogs/` section. The list
+ * is limited at WordPress to the rolling last six months; detail links remain
+ * addressable by id. Neither list nor body is metered.
+ */
+export async function listBlogs(page: number, limit: number): Promise<MediaPage<BlogItem>> {
+  return listEditorialPosts(blogPostType, page, limit);
+}
+
+export async function getBlog(blogId: string): Promise<BlogDetail | null> {
+  return getEditorialPost(blogPostType, blogId);
 }

@@ -499,6 +499,18 @@ Optional Firebase token. Query: `page`, `limit`. Rows carry `youtube_id: null`; 
 
 Optional Firebase token. One webinar with `youtube_id` resolved from its permalink. `404` with `WEBINAR_NOT_FOUND` for an unknown id.
 
+### Blogs
+
+Free to read: nothing here is metered or gated. Read from the `blogs` WordPress post type, in the same article shape the app uses for free editorial content. The listing is limited to posts published in the rolling last six months.
+
+#### `GET /v1/blogs`
+
+Optional Firebase token. Query: `page`, `limit`. Returns only blogs from the rolling last six months as `blogs[]` with `id`, `title`, `excerpt`, `image_url`, `published_at`, and `link`, plus the standard pagination object.
+
+#### `GET /v1/blogs/:blog_id`
+
+Optional Firebase token. Returns the selected blog as `blog`, including `body` (plain text) and `body_html` (rich content). `404` with `BLOG_NOT_FOUND` for an unknown id.
+
 ### Journals
 
 #### `GET /v1/journals/about`
