@@ -211,9 +211,10 @@ of at least 32 characters and rotate it to invalidate every outstanding link.
 
 White papers follow the journal model for storage, but **not for access: they
 are free.** Listing and view-link minting both sit on `resolveOptionalUser`
-with no entitlement check, so a caller with no account reads the same library -
-which is what the app's free Insights tab relies on. The earlier
-premium-throughout rule is gone; journals remain premium.
+with no entitlement check and no Insights meter, so a caller with no account
+reads the same library. They were metered between migrations 029 and 031;
+`031_whitepapers_off_the_meter.sql` clears the reads spent on them. Journals
+remain premium.
 
 The one behavioural difference from journals is that **only rows the CMS has
 marked live are published**. The filter is `lower(btrim(live_status)) = 'live'`,

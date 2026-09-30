@@ -7,7 +7,6 @@ import { query } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
 import { toSingleLine } from "../lib/html-text.js";
-import { meteredCallerBodySchema, meteredInsight } from "../lib/insight-meter.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import {
   anonymousReaderId,
@@ -80,13 +79,13 @@ function resolveWhitepaperPath(filename: string): string {
 }
 
 /**
- * White papers are Insights content. The listing is open to anyone, signed in
- * or not; opening a paper counts against the reader's five free Insights
- * reads a month. The app spends the read with POST /v1/insights/access and
- * then mints the view link below, which only checks that spend happened.
+ * White papers are free to read. The listing and the view-link mint are both
+ * open to anyone, signed in or not, and neither touches the Insights meter:
+ * they came off it on 2026-09-30, and `whitepaper` is no longer a content
+ * type POST /v1/insights/access accepts. Journals stay premium.
  *
- * resolveOptionalUser stays so a signed-in reader is identified - it is what
- * the meter and the view token read - but nothing here requires it to resolve.
+ * resolveOptionalUser stays so a signed-in reader is identified - the view
+ * token records who asked - but nothing here requires it to resolve.
  */
 whitepaperRouter.get("/", resolveOptionalUser, validate(listSchema, "query"), asyncHandler(async (req, res) => {
   const { page, limit, year, category, search } = req.query as unknown as {
@@ -132,15 +131,14 @@ whitepaperRouter.get("/", resolveOptionalUser, validate(listSchema, "query"), as
   });
 }));
 
-// The signed link is the paywalled thing itself, so the meter is enforced on
-// the mint: a caller that never spent a read on this paper gets a 402 here,
-// not a token. `installation_id` travels in the body, as it is a POST.
+// No meter and no entitlement check: anyone who can list a paper can mint a
+// link to it. The link is still signed and short-lived so the PDF directory
+// itself is never exposed. Older app builds post `{ installation_id }` here
+// from when the mint was metered; the body is simply not read.
 whitepaperRouter.post(
   "/:whitepaper_id/view-link",
   resolveOptionalUser,
   validate(whitepaperParams, "params"),
-  validate(meteredCallerBodySchema),
-  meteredInsight("whitepaper", "whitepaper_id", "body"),
   asyncHandler(async (req, res) => {
     const whitepaperId = req.params.whitepaper_id as string;
     const result = await query<{ sr_no: number }>(
@@ -152,7 +150,7 @@ whitepaperRouter.post(
     // Signed-out readers are legitimate callers, so the token records who
     // asked when that is known and a fixed placeholder when it is not. The id
     // is carried for attribution only - nothing downstream authorises against
-    // it; the meter above already did.
+    // it.
     const { token, expiresAt } = createWhitepaperToken(
       whitepaperId,
       req.appUser?.id ?? anonymousReaderId

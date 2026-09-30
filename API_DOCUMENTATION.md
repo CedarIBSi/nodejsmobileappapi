@@ -425,9 +425,9 @@ Public article body lookup, cached for 300 seconds. Returns `{ article: { id, bo
 
 ### Insights meter
 
-Everything on the app's Insights tab - analyst opinions, leadership interviews, white papers, podcasts and videos - shares one free allowance: **five distinct items per calendar month** in `Asia/Kolkata`, counted per signed-in user or, before sign-in, per installation. Reopening an item already read this month is free. When a caller signs in, the installation's reads for the month are merged into the account. Premium and staff users bypass the meter.
+Analyst opinions, leadership interviews, podcasts and videos share one free allowance: **five distinct items per calendar month** in `Asia/Kolkata`, counted per signed-in user or, before sign-in, per installation. Reopening an item already read this month is free. When a caller signs in, the installation's reads for the month are merged into the account. Premium and staff users bypass the meter. White papers are not metered: they are free to read, and `whitepaper` is rejected as a `content_type` since 2026-09-30.
 
-Listings for all five types are open to anyone. The thing the allowance buys - an article body, a signed PDF link, an audio URL, a YouTube id - is served only after a read has been spent on that item.
+Listings for all four types are open to anyone. The thing the allowance buys - an article body, an audio URL, a YouTube id - is served only after a read has been spent on that item.
 
 #### `POST /v1/insights/access`
 
@@ -441,7 +441,7 @@ Optional Firebase token. Anonymous callers must supply a persistent installation
 }
 ```
 
-`content_type` is one of `analyst_opinion`, `leadership_interview`, `whitepaper`, `podcast`, `video`. Editorial ids may be given as `12345` or `postid-12345`; both count as the same item.
+`content_type` is one of `analyst_opinion`, `leadership_interview`, `podcast`, `video`. Editorial ids may be given as `12345` or `postid-12345`; both count as the same item.
 
 Allowed/denied shape:
 
@@ -466,7 +466,6 @@ Each of the routes below checks that a read was spent on the item (or that the c
 
 - `GET /v1/analyst-opinions/:opinion_id`
 - `GET /v1/leadership-interviews/:interview_id`
-- `POST /v1/whitepapers/:whitepaper_id/view-link`
 - `GET /v1/podcasts/:podcast_id`
 - `GET /v1/videos/:video_id`
 
@@ -540,9 +539,9 @@ Serves the PDF inline. Supports `Range: bytes=...`, returning `206` or `416`. Th
 
 Optional Firebase token. Query: `page`, `limit`, optional `year`, `category`, and `search`. Only rows with `live_status = Live` and a PDF filename are listed.
 
-#### `POST /v1/whitepapers/:whitepaper_id/view-link` — Metered
+#### `POST /v1/whitepapers/:whitepaper_id/view-link`
 
-Returns a signed, expiring `view_url`. Optional body `{ "installation_id" }` for signed-out callers. See the Insights meter above.
+Optional Firebase token. Returns a signed, expiring `view_url`. Free to read: no meter and no entitlement check. A body is accepted and ignored, for app builds that still send `{ "installation_id" }`.
 
 #### `GET /v1/whitepapers/view/:token`
 

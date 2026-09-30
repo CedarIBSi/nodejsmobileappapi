@@ -5,12 +5,14 @@ import { asyncHandler } from "./async-handler.js";
 import { hasEntitlement, isStaffRole } from "./entitlement.js";
 
 /**
- * The free-read meter for the app's Insights tab.
+ * The free-read meter on IBSi's editorial programming.
  *
- * Everything under Insights - analyst opinions, leadership interviews, white
- * papers, podcasts and videos - shares one allowance: five distinct items per
- * calendar month, counted in Asia/Kolkata, per signed-in user or, before
- * sign-in, per installation. Premium subscribers and staff are never metered.
+ * Analyst opinions, leadership interviews, podcasts and videos share one
+ * allowance: five distinct items per calendar month, counted in Asia/Kolkata,
+ * per signed-in user or, before sign-in, per installation. Premium
+ * subscribers and staff are never metered. White papers were on the meter
+ * until 2026-09-30 and are now free, so `whitepaper` is not a content type
+ * here; migration 031 clears the reads spent on them.
  *
  * Two operations, deliberately separate. `consumeInsightRead` is the only
  * place a read is spent; the app calls it (POST /v1/insights/access) before
@@ -23,7 +25,6 @@ import { hasEntitlement, isStaffRole } from "./entitlement.js";
 export const insightContentTypes = [
   "analyst_opinion",
   "leadership_interview",
-  "whitepaper",
   "podcast",
   "video"
 ] as const;
