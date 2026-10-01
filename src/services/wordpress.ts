@@ -56,6 +56,7 @@ export type BlogItem = AnalystOpinionItem;
 export type BlogDetail = AnalystOpinionDetail;
 export type CaseStudyItem = AnalystOpinionItem;
 export type CaseStudyDetail = AnalystOpinionDetail;
+export type InsightTopic = { id: number; name: string };
 
 export type MediaPage<T> = { items: T[]; total: number };
 
@@ -830,6 +831,37 @@ export async function listAnalystOpinions(
   tagId?: number
 ): Promise<MediaPage<AnalystOpinionItem>> {
   return listEditorialPosts(analystOpinionPostType, page, limit, tagId);
+}
+
+/**
+ * The Analyst Opinions topic buttons are editorial website configuration, not
+ * an app-owned taxonomy. Read them from /views/ so adding, removing or
+ * reordering a button does not require an API or app release.
+ */
+export async function listAnalystOpinionTopics(): Promise<InsightTopic[]> {
+  return cached("analyst-opinion-topics", config().MEDIA_CACHE_TTL_SECONDS * 12_000, async () => {
+    const response = await wordPressRequest(
+      new URL("/views/", config().WORDPRESS_BASE_URL),
+      "text/html"
+    );
+    const html = await response.text();
+    const topics = new Map<number, InsightTopic>();
+    const elementPattern =
+      /<([a-z][\w-]*)\b([^>]*\bclass=["'][^"']*\bbtn-cat\b[^"']*["'][^>]*)>([\s\S]*?)<\/\1>/gi;
+
+    for (const match of html.matchAll(elementPattern)) {
+      const attributes = match[2] ?? "";
+      const id = Number(/\battr-tid=["'](\d+)["']/i.exec(attributes)?.[1]);
+      const name = toText(match[3] ?? "");
+      if (!Number.isInteger(id) || id <= 0 || !name || /^(?:all|webinars)$/i.test(name)) continue;
+      topics.set(id, { id, name });
+    }
+
+    if (topics.size === 0) {
+      throw new HttpError(502, "WordPress returned no Insight topics", "WORDPRESS_UNAVAILABLE");
+    }
+    return [...topics.values()];
+  });
 }
 
 export async function getAnalystOpinion(

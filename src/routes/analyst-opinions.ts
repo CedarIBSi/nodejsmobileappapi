@@ -3,12 +3,12 @@ import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
 import { meteredCallerSchema, meteredInsight } from "../lib/insight-meter.js";
-import { insightTopics } from "../lib/insight-topics.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import {
   getAnalystOpinion,
+  listAnalystOpinionTopics,
   listAnalystOpinions
 } from "../services/wordpress.js";
 
@@ -23,7 +23,7 @@ const publicCacheSeconds = 300;
 const opinionParams = z.object({
   opinion_id: z.string().trim().regex(/^(?:postid-)?\d+$/i).max(64)
 });
-/** `tag` is one of the ids /topics lists; anything else narrows to nothing. */
+/** Positive here; the handler checks membership in the live /topics list. */
 const listQuery = paginationSchema.extend({
   tag: z.coerce.number().int().positive().optional()
 });
@@ -32,10 +32,14 @@ const listQuery = paginationSchema.extend({
  * The topic filter, as the website offers it. Before the id route, so the
  * word is never read as an id.
  */
-analystOpinionRouter.get("/topics", (_req, res) => {
-  res.set("Cache-Control", `public, max-age=${publicCacheSeconds * 12}`);
-  res.json({ topics: insightTopics });
-});
+analystOpinionRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    const topics = await listAnalystOpinionTopics();
+    res.set("Cache-Control", `public, max-age=${publicCacheSeconds * 12}`);
+    res.json({ topics });
+  })
+);
 
 analystOpinionRouter.get(
   "/",
@@ -47,6 +51,12 @@ analystOpinionRouter.get(
       limit: number;
       tag?: number;
     };
+    if (tag !== undefined) {
+      const topics = await listAnalystOpinionTopics();
+      if (!topics.some((topic) => topic.id === tag)) {
+        throw new HttpError(400, "Unknown analyst opinion topic", "INVALID_INSIGHT_TOPIC");
+      }
+    }
     const { items, total } = await listAnalystOpinions(page, limit, tag);
     res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
     res.json({
