@@ -524,6 +524,16 @@ Returns `case_studies[]` with `id`, `title`, `excerpt`, `image_url`, `published_
 
 Returns the selected item as `case_study`, including the listing fields and its complete `body` (plain text) and `body_html` (rich content). Both a numeric WordPress ID and the app's `postid-123` form are accepted. `404` with `CASE_STUDY_NOT_FOUND` for an unknown id.
 
+### Express interest
+
+#### `POST /v1/interest` — Private
+
+The "Express interest" button on the app's From IBSi pages. Body: `{ "topic": "IBSi Galaxy", "platform": "android" }`. Records a row in `interest_requests` with the caller's name and email, then emails `INTEREST_TO_EMAIL` (default `amitj@ibsintelligence.com`) over SMTP with the reader's address as reply-to. Returns `201 { "interest": { "id", "emailed": true } }`.
+
+`503 INTEREST_NOT_CONFIGURED` when `SMTP_HOST` / `SMTP_FROM` are unset (the row is still written), `502 INTEREST_EMAIL_FAILED` when the send fails. The app answers both by opening the reader's own mail client with the same details.
+
+Environment: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_SECURE` (`false` for STARTTLS), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `INTEREST_TO_EMAIL`. Migration `033_interest_requests.sql`.
+
 ### Journals
 
 #### `GET /v1/journals/about`

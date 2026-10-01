@@ -125,6 +125,17 @@ const schema = z.object({
   // website splits them into per-category folders, but nothing here needs to,
   // and a flat root keeps `category` away from the filesystem entirely.
   // Trimmed for the same reason as JOURNAL_STORAGE_DIR above.
+  // Outbound mail for "Express interest" (src/lib/mailer.ts). Optional: with
+  // SMTP_HOST or SMTP_FROM unset the route answers 503 and the app falls
+  // back to the reader's mail client. Microsoft 365: smtp.office365.com,
+  // 587, SMTP_SECURE=false (STARTTLS), a licensed mailbox as user and from.
+  SMTP_HOST: z.string().trim().default(""),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+  SMTP_USER: z.string().trim().default(""),
+  SMTP_PASS: z.string().default(""),
+  SMTP_FROM: z.string().trim().default(""),
+  INTEREST_TO_EMAIL: z.string().email().default("amitj@ibsintelligence.com"),
   WHITEPAPER_STORAGE_DIR: z
     .string()
     .min(1)
