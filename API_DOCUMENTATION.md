@@ -546,7 +546,7 @@ Public marketing/about content; cached for 300 seconds.
 
 #### `GET /v1/journals` — Private + premium/staff
 
-Query: `page`, `limit`, optional `year`, `edition_type`, and `search`. PDF filenames are never returned.
+Query: `page`, `limit`, optional `year`, `edition` (`india` or `global`, matched by the same word rule the locks use), `edition_type` (the exact CMS string), and `search`. PDF filenames are never returned.
 
 Each journal carries `locked` and `locked_reason` (`edition` when the issue's
 edition is not on the reader's plan, `archive` when it predates a monthly

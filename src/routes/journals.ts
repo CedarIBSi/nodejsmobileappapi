@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
+import { type JournalEdition, journalEditions } from "../lib/catalogue.js";
 import { z } from "zod";
 import { config } from "../config.js";
 import { query } from "../db/pool.js";
@@ -43,8 +44,24 @@ type JournalRow = {
 const listSchema = paginationSchema.extend({
   year: z.coerce.number().int().min(1900).max(2200).optional(),
   edition_type: z.string().trim().min(1).max(100).optional(),
+  /**
+   * The edition as the app's switcher names it. Filters by the same word
+   * rule `journalEditionOf` locks by, so an issue can never be in a tab the
+   * lock says is the other edition. `edition_type` remains the exact-string
+   * filter for the free-text CMS value.
+   */
+  edition: z.enum(journalEditions).optional(),
   search: z.string().trim().min(1).max(200).optional()
 });
+
+/**
+ * SQL for `journalEditionOf`: "india" wins when both words appear, as it
+ * does in the classifier, so the two can never disagree about an issue.
+ */
+const editionSql: Record<JournalEdition, string> = {
+  india: `edition_type ~* '\\mindia\\M'`,
+  global: `edition_type ~* '\\mglobal\\M' AND edition_type !~* '\\mindia\\M'`
+};
 const journalParams = z.object({ journal_id: z.string().regex(/^[1-9]\d*$/) });
 const viewParams = z.object({ token: z.string().min(20).max(2048) });
 
@@ -121,8 +138,8 @@ journalRouter.get("/filters", ...privateRoute, asyncHandler(async (req, res) => 
 
 journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHandler(async (req, res) => {
   const access = await requireJournalAccess(req.appUser!);
-  const { page, limit, year, edition_type: editionType, search } = req.query as unknown as {
-    page: number; limit: number; year?: number; edition_type?: string; search?: string;
+  const { page, limit, year, edition_type: editionType, edition, search } = req.query as unknown as {
+    page: number; limit: number; year?: number; edition_type?: string; edition?: JournalEdition; search?: string;
   };
   const filters: string[] = ["redirect_page IS NOT NULL", "btrim(redirect_page) <> ''"];
   const values: unknown[] = [];
@@ -133,6 +150,9 @@ journalRouter.get("/", ...privateRoute, validate(listSchema, "query"), asyncHand
   if (editionType) {
     values.push(editionType);
     filters.push(`edition_type = $${values.length}`);
+  }
+  if (edition) {
+    filters.push(`(${editionSql[edition]})`);
   }
   if (search) {
     values.push(`%${search}%`);
