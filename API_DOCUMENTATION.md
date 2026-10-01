@@ -629,10 +629,14 @@ Analyst Opinions (the WordPress **IBSi Views** article collection) are
 Insights content. The listing is public; the body is metered (see the Insights
 meter above).
 
-#### `GET /v1/analyst-opinions?page=1&limit=20`
+#### `GET /v1/analyst-opinions/topics`
+
+The website's topic filter: `topics[]` of `{ id, name }`, in the site's order. `id` is the WordPress tag id the listing filters by.
+
+#### `GET /v1/analyst-opinions?page=1&limit=20&tag=11384`
 
 Returns `analyst_opinions[]` with `id`, `title`, `excerpt`, `image_url`,
-`published_at`, and `link`, plus the standard pagination object.
+`published_at`, and `link`, plus the standard pagination object. Optional `tag` narrows to one topic from `/topics`.
 
 #### `GET /v1/analyst-opinions/:opinion_id` — Metered
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
 import { meteredCallerSchema, meteredInsight } from "../lib/insight-meter.js";
+import { insightTopics } from "../lib/insight-topics.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -22,14 +23,31 @@ const publicCacheSeconds = 300;
 const opinionParams = z.object({
   opinion_id: z.string().trim().regex(/^(?:postid-)?\d+$/i).max(64)
 });
+/** `tag` is one of the ids /topics lists; anything else narrows to nothing. */
+const listQuery = paginationSchema.extend({
+  tag: z.coerce.number().int().positive().optional()
+});
+
+/**
+ * The topic filter, as the website offers it. Before the id route, so the
+ * word is never read as an id.
+ */
+analystOpinionRouter.get("/topics", (_req, res) => {
+  res.set("Cache-Control", `public, max-age=${publicCacheSeconds * 12}`);
+  res.json({ topics: insightTopics });
+});
 
 analystOpinionRouter.get(
   "/",
   resolveOptionalUser,
-  validate(paginationSchema, "query"),
+  validate(listQuery, "query"),
   asyncHandler(async (req, res) => {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const { items, total } = await listAnalystOpinions(page, limit);
+    const { page, limit, tag } = req.query as unknown as {
+      page: number;
+      limit: number;
+      tag?: number;
+    };
+    const { items, total } = await listAnalystOpinions(page, limit, tag);
     res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
     res.json({
       analyst_opinions: items,

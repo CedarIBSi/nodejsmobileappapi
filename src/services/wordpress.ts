@@ -744,20 +744,27 @@ const caseStudyPostType: EditorialPostType = {
   restBase: "casestudy"
 };
 
+/**
+ * `tagId` narrows the listing to posts carrying that WordPress tag - the
+ * site's own topic filter, see lib/insight-topics.ts. Part of the cache key,
+ * so a filtered page never stands in for the whole.
+ */
 async function listEditorialPosts(
   type: EditorialPostType,
   page: number,
-  limit: number
+  limit: number,
+  tagId?: number
 ): Promise<MediaPage<AnalystOpinionItem>> {
   return cached(
-    `${type.cachePrefix}s:${page}:${limit}`,
+    `${type.cachePrefix}s:${page}:${limit}:${tagId ?? "all"}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
+      const params: Record<string, string> = {};
+      if (type.listWindowMonths) params.after = contentWindowStart(type.listWindowMonths);
+      if (tagId) params.tags = String(tagId);
       const { posts, total } = await fetchPostType(type.restBase, page, limit, {
         fields: "id,date_gmt,link,title,excerpt,_links,_embedded",
-        params: type.listWindowMonths
-          ? { after: contentWindowStart(type.listWindowMonths) }
-          : undefined
+        params
       });
       return {
         items: posts.map((post) => ({
@@ -819,9 +826,10 @@ async function getEditorialPost(
  */
 export async function listAnalystOpinions(
   page: number,
-  limit: number
+  limit: number,
+  tagId?: number
 ): Promise<MediaPage<AnalystOpinionItem>> {
-  return listEditorialPosts(analystOpinionPostType, page, limit);
+  return listEditorialPosts(analystOpinionPostType, page, limit, tagId);
 }
 
 export async function getAnalystOpinion(
