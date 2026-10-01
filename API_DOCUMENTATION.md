@@ -631,12 +631,12 @@ meter above).
 
 #### `GET /v1/analyst-opinions/topics`
 
-The live Analyst Opinions topic filter from `/views/`: `topics[]` of `{ id, name }`, in the site's order. `id` is the WordPress tag id the listing filters by. The API reads and caches the website buttons, so editorial changes do not require a release.
+The live Analyst Opinions topic filter from `/views/`: `topics[]` of `{ id, name }`, in the site's order. `id` is the WordPress category id the listing filters by - the same categories `/v1/news/categories` lists. The API reads and caches the website buttons, so editorial changes do not require a release.
 
-#### `GET /v1/analyst-opinions?page=1&limit=20&tag=11384`
+#### `GET /v1/analyst-opinions?page=1&limit=20&category=11384`
 
 Returns `analyst_opinions[]` with `id`, `title`, `excerpt`, `image_url`,
-`published_at`, and `link`, plus the standard pagination object. Optional `tag` narrows to one topic from `/topics`; an unknown id returns `400 INVALID_INSIGHT_TOPIC`.
+`published_at`, and `link`, plus the standard pagination object. Optional `category` narrows to one topic from `/topics`; an unknown id returns `400 INVALID_INSIGHT_TOPIC`.
 
 #### `GET /v1/analyst-opinions/:opinion_id` — Metered
 

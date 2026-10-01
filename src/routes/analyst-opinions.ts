@@ -23,9 +23,13 @@ const publicCacheSeconds = 300;
 const opinionParams = z.object({
   opinion_id: z.string().trim().regex(/^(?:postid-)?\d+$/i).max(64)
 });
-/** Positive here; the handler checks membership in the live /topics list. */
+/**
+ * `category`: a WordPress category id from the live /topics list - the
+ * site's topics are categories, the same ones the news feed filters by.
+ * Positive here; the handler checks membership.
+ */
 const listQuery = paginationSchema.extend({
-  tag: z.coerce.number().int().positive().optional()
+  category: z.coerce.number().int().positive().optional()
 });
 
 /**
@@ -46,18 +50,18 @@ analystOpinionRouter.get(
   resolveOptionalUser,
   validate(listQuery, "query"),
   asyncHandler(async (req, res) => {
-    const { page, limit, tag } = req.query as unknown as {
+    const { page, limit, category } = req.query as unknown as {
       page: number;
       limit: number;
-      tag?: number;
+      category?: number;
     };
-    if (tag !== undefined) {
+    if (category !== undefined) {
       const topics = await listAnalystOpinionTopics();
-      if (!topics.some((topic) => topic.id === tag)) {
+      if (!topics.some((topic) => topic.id === category)) {
         throw new HttpError(400, "Unknown analyst opinion topic", "INVALID_INSIGHT_TOPIC");
       }
     }
-    const { items, total } = await listAnalystOpinions(page, limit, tag);
+    const { items, total } = await listAnalystOpinions(page, limit, category);
     res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
     res.json({
       analyst_opinions: items,
