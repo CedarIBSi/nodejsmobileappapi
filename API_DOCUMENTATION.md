@@ -528,7 +528,7 @@ Returns the selected item as `case_study`, including the listing fields and its 
 
 #### `POST /v1/interest` — Private
 
-The "Express interest" button on the app's From IBSi pages. Body: `{ "topic": "IBSi Galaxy", "platform": "android" }`. Records a row in `interest_requests` with the caller's name and email, then emails `INTEREST_TO_EMAIL` (default `amitj@ibsintelligence.com`) over SMTP with the reader's address as reply-to. Returns `201 { "interest": { "id", "emailed": true } }`.
+The "Express interest" button on the app's From IBSi pages. Body: `{ "topic": "IBSi Galaxy", "platform": "android" }`. Records a row in `interest_requests` with the caller's name and email, then emails `INTEREST_TO_EMAIL` (one or more comma- or semicolon-separated recipients; default `amitj@ibsintelligence.com`) over SMTP with the reader's address as reply-to. Returns `201 { "interest": { "id", "emailed": true } }`.
 
 `503 INTEREST_NOT_CONFIGURED` when `SMTP_HOST` / `SMTP_FROM` are unset (the row is still written), `502 INTEREST_EMAIL_FAILED` when the send fails. The app answers both by opening the reader's own mail client with the same details.
 

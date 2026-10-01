@@ -21,6 +21,29 @@ const defaultWordPressUserAgent =
 const defaultJournalStorageDir = "C:\\ibsi-pdfs\\ibs-journal";
 const defaultWhitepaperStorageDir = "C:\\ibsi-pdfs\\ibs-whitepaper";
 
+const emailAddress = z.string().email();
+const emailRecipients = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) =>
+      value
+        .split(/[;,]/)
+        .map((recipient) => recipient.trim())
+        .filter(Boolean)
+        .every((recipient) => emailAddress.safeParse(recipient).success),
+    "INTEREST_TO_EMAIL must contain valid email addresses separated by commas or semicolons"
+  )
+  // Nodemailer accepts a comma-separated recipient string.
+  .transform((value) =>
+    value
+      .split(/[;,]/)
+      .map((recipient) => recipient.trim())
+      .filter(Boolean)
+      .join(", ")
+  );
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   // Bind to loopback by default so the API is reachable only through the
@@ -135,7 +158,7 @@ const schema = z.object({
   SMTP_USER: z.string().trim().default(""),
   SMTP_PASS: z.string().default(""),
   SMTP_FROM: z.string().trim().default(""),
-  INTEREST_TO_EMAIL: z.string().email().default("amitj@ibsintelligence.com"),
+  INTEREST_TO_EMAIL: emailRecipients.default("amitj@ibsintelligence.com"),
   WHITEPAPER_STORAGE_DIR: z
     .string()
     .min(1)
