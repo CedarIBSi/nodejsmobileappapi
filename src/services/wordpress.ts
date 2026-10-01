@@ -598,9 +598,17 @@ export async function getArticleBody(articleId: string): Promise<string | null> 
   return (await getArticleContent(articleId))?.text ?? null;
 }
 
-export async function listPodcasts(page: number, limit: number): Promise<MediaPage<PodcastItem>> {
-  return cached(`podcasts:${page}:${limit}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
-    const { posts, total } = await fetchPostType("podcasts", page, limit);
+/** `categoryId` narrows to one WordPress category, as on the editorial listers. */
+export async function listPodcasts(
+  page: number,
+  limit: number,
+  categoryId?: number
+): Promise<MediaPage<PodcastItem>> {
+  const key = `podcasts:${page}:${limit}:${categoryId ?? "all"}`;
+  return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const { posts, total } = await fetchPostType("podcasts", page, limit, {
+      params: categoryId ? { categories: String(categoryId) } : undefined
+    });
     return { items: posts.map(toPodcast), total };
   });
 }
@@ -628,9 +636,16 @@ function toVideo(post: WordPressPost, youtubeId: string | null): VideoItem {
  * video, and the listing never shows it now that playback is metered: the
  * reader opens one video, and getVideo resolves that one.
  */
-export async function listVideos(page: number, limit: number): Promise<MediaPage<VideoItem>> {
-  return cached(`videos:${page}:${limit}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
-    const { posts, total } = await fetchPostType("videos", page, limit);
+export async function listVideos(
+  page: number,
+  limit: number,
+  categoryId?: number
+): Promise<MediaPage<VideoItem>> {
+  const key = `videos:${page}:${limit}:${categoryId ?? "all"}`;
+  return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const { posts, total } = await fetchPostType("videos", page, limit, {
+      params: categoryId ? { categories: String(categoryId) } : undefined
+    });
     return { items: posts.map((post) => toVideo(post, null)), total };
   });
 }
@@ -687,9 +702,16 @@ function toWebinar(post: WordPressPost, youtubeId: string | null): VideoItem {
   return { ...toVideo(post, youtubeId), is_premium: false };
 }
 
-export async function listWebinars(page: number, limit: number): Promise<MediaPage<VideoItem>> {
-  return cached(`webinars:${page}:${limit}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
-    const { posts, total } = await fetchPostType("webinars", page, limit);
+export async function listWebinars(
+  page: number,
+  limit: number,
+  categoryId?: number
+): Promise<MediaPage<VideoItem>> {
+  const key = `webinars:${page}:${limit}:${categoryId ?? "all"}`;
+  return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const { posts, total } = await fetchPostType("webinars", page, limit, {
+      params: categoryId ? { categories: String(categoryId) } : undefined
+    });
     return { items: posts.map((post) => toWebinar(post, null)), total };
   });
 }
@@ -881,9 +903,10 @@ export type LeadershipInterviewDetail = AnalystOpinionDetail;
 
 export async function listLeadershipInterviews(
   page: number,
-  limit: number
+  limit: number,
+  categoryId?: number
 ): Promise<MediaPage<LeadershipInterviewItem>> {
-  return listEditorialPosts(leadershipInterviewPostType, page, limit);
+  return listEditorialPosts(leadershipInterviewPostType, page, limit, categoryId);
 }
 
 export async function getLeadershipInterview(
@@ -897,8 +920,12 @@ export async function getLeadershipInterview(
  * is limited at WordPress to the rolling last six months; detail links remain
  * addressable by id. Neither list nor body is metered.
  */
-export async function listBlogs(page: number, limit: number): Promise<MediaPage<BlogItem>> {
-  return listEditorialPosts(blogPostType, page, limit);
+export async function listBlogs(
+  page: number,
+  limit: number,
+  categoryId?: number
+): Promise<MediaPage<BlogItem>> {
+  return listEditorialPosts(blogPostType, page, limit, categoryId);
 }
 
 export async function getBlog(blogId: string): Promise<BlogDetail | null> {
@@ -911,10 +938,57 @@ export async function getBlog(blogId: string): Promise<BlogDetail | null> {
  */
 export async function listCaseStudies(
   page: number,
-  limit: number
+  limit: number,
+  categoryId?: number
 ): Promise<MediaPage<CaseStudyItem>> {
-  return listEditorialPosts(caseStudyPostType, page, limit);
+  return listEditorialPosts(caseStudyPostType, page, limit, categoryId);
 }
+
+/** A site topic with how many items of one kind it holds. */
+export type ContentTopic = InsightTopic & { count: number };
+
+/**
+ * The site's topics that actually narrow one kind of content, each with its
+ * count. The site offers the same topic buttons on every Views page, but a
+ * topic with no podcasts is a chip that leads to an empty list, and a post
+ * type that ignores `categories` altogether would redraw the same list under
+ * every chip. So each topic is counted against the kind, one request each
+ * (sequentially - a burst trips the site's bot protection), and kept only
+ * when it holds something and fewer than everything. If no topic differs
+ * from the whole, the filter is not honoured for this kind and the list is
+ * empty, which the app reads as "no filter here". Cached for twelve hours.
+ */
+async function listTopicsFor(
+  kind: string,
+  countFor: (categoryId?: number) => Promise<number>
+): Promise<ContentTopic[]> {
+  return cached(`topics:${kind}`, config().MEDIA_CACHE_TTL_SECONDS * 12_000, async () => {
+    const all = await countFor();
+    if (all === 0) return [];
+    const counted: ContentTopic[] = [];
+    for (const topic of await listAnalystOpinionTopics()) {
+      counted.push({ ...topic, count: await countFor(topic.id) });
+    }
+    if (counted.every((topic) => topic.count === all)) return [];
+    return counted.filter((topic) => topic.count > 0 && topic.count < all);
+  });
+}
+
+export const listPodcastTopics = () =>
+  listTopicsFor("podcasts", async (categoryId) => (await listPodcasts(1, 1, categoryId)).total);
+export const listVideoTopics = () =>
+  listTopicsFor("videos", async (categoryId) => (await listVideos(1, 1, categoryId)).total);
+export const listWebinarTopics = () =>
+  listTopicsFor("webinars", async (categoryId) => (await listWebinars(1, 1, categoryId)).total);
+export const listBlogTopics = () =>
+  listTopicsFor("blogs", async (categoryId) => (await listBlogs(1, 1, categoryId)).total);
+export const listCaseStudyTopics = () =>
+  listTopicsFor("case-studies", async (categoryId) => (await listCaseStudies(1, 1, categoryId)).total);
+export const listLeadershipInterviewTopics = () =>
+  listTopicsFor(
+    "leadership-interviews",
+    async (categoryId) => (await listLeadershipInterviews(1, 1, categoryId)).total
+  );
 
 export async function getCaseStudy(caseStudyId: string): Promise<CaseStudyDetail | null> {
   return getEditorialPost(caseStudyPostType, caseStudyId);

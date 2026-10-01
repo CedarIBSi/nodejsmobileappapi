@@ -12,9 +12,13 @@ import {
   getVideo,
   getWebinar,
   listBlogs,
+  listBlogTopics,
   listPodcasts,
+  listPodcastTopics,
   listVideos,
-  listWebinars
+  listVideoTopics,
+  listWebinars,
+  listWebinarTopics
 } from "../services/wordpress.js";
 
 export const podcastRouter = Router();
@@ -22,14 +26,19 @@ export const videoRouter = Router();
 export const webinarRouter = Router();
 export const blogRouter = Router();
 
-const listRoute = [resolveOptionalUser, validate(paginationSchema, "query")];
+/** `category` narrows to one site topic from the type's /topics route. */
+const listQuery = paginationSchema.extend({
+  category: z.coerce.number().int().positive().optional()
+});
+const listRoute = [resolveOptionalUser, validate(listQuery, "query")];
+const topicsCacheSeconds = 3600;
 const podcastParams = z.object({ podcast_id: z.string().regex(/^\d+$/).max(20) });
 const videoParams = z.object({ video_id: z.string().regex(/^\d+$/).max(20) });
 const webinarParams = z.object({ webinar_id: z.string().regex(/^\d+$/).max(20) });
 const blogParams = z.object({ blog_id: z.string().regex(/^\d+$/).max(20) });
 
 function requestedPage(req: { query: unknown }) {
-  return req.query as unknown as { page: number; limit: number };
+  return req.query as unknown as { page: number; limit: number; category?: number };
 }
 
 /**
@@ -45,11 +54,19 @@ function requestedPage(req: { query: unknown }) {
  * keeps a signed-in caller identified for logging and rate limiting.
  */
 podcastRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    res.set("Cache-Control", `public, max-age=${topicsCacheSeconds}`);
+    res.json({ topics: await listPodcastTopics() });
+  })
+);
+
+podcastRouter.get(
   "/",
   ...listRoute,
   asyncHandler(async (req, res) => {
-    const { page, limit } = requestedPage(req);
-    const { items, total } = await listPodcasts(page, limit);
+    const { page, limit, category } = requestedPage(req);
+    const { items, total } = await listPodcasts(page, limit, category);
     res.json({
       podcasts: items.map((podcast) => ({ ...podcast, audio_url: null })),
       pagination: pagination(page, limit, total)
@@ -73,11 +90,19 @@ podcastRouter.get(
 );
 
 videoRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    res.set("Cache-Control", `public, max-age=${topicsCacheSeconds}`);
+    res.json({ topics: await listVideoTopics() });
+  })
+);
+
+videoRouter.get(
   "/",
   ...listRoute,
   asyncHandler(async (req, res) => {
-    const { page, limit } = requestedPage(req);
-    const { items, total } = await listVideos(page, limit);
+    const { page, limit, category } = requestedPage(req);
+    const { items, total } = await listVideos(page, limit, category);
     res.json({
       videos: items,
       pagination: pagination(page, limit, total)
@@ -107,11 +132,19 @@ videoRouter.get(
  * fetch per webinar and the listing should not pay that for every row.
  */
 webinarRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    res.set("Cache-Control", `public, max-age=${topicsCacheSeconds}`);
+    res.json({ topics: await listWebinarTopics() });
+  })
+);
+
+webinarRouter.get(
   "/",
   ...listRoute,
   asyncHandler(async (req, res) => {
-    const { page, limit } = requestedPage(req);
-    const { items, total } = await listWebinars(page, limit);
+    const { page, limit, category } = requestedPage(req);
+    const { items, total } = await listWebinars(page, limit, category);
     res.json({
       webinars: items,
       pagination: pagination(page, limit, total)
@@ -133,11 +166,19 @@ webinarRouter.get(
 
 /** Blogs are free editorial posts, listed and read without the Insights meter. */
 blogRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    res.set("Cache-Control", `public, max-age=${topicsCacheSeconds}`);
+    res.json({ topics: await listBlogTopics() });
+  })
+);
+
+blogRouter.get(
   "/",
   ...listRoute,
   asyncHandler(async (req, res) => {
-    const { page, limit } = requestedPage(req);
-    const { items, total } = await listBlogs(page, limit);
+    const { page, limit, category } = requestedPage(req);
+    const { items, total } = await listBlogs(page, limit, category);
     res.json({
       blogs: items,
       pagination: pagination(page, limit, total)

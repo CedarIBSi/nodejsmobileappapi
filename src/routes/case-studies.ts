@@ -8,7 +8,8 @@ import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import {
   getCaseStudy,
-  listCaseStudies
+  listCaseStudies,
+  listCaseStudyTopics
 } from "../services/wordpress.js";
 
 /**
@@ -21,13 +22,30 @@ const caseStudyParams = z.object({
   case_study_id: z.string().trim().regex(/^(?:postid-)?\d+$/i).max(64)
 });
 
+/** `category` narrows to one site topic from /topics. */
+const listQuery = paginationSchema.extend({
+  category: z.coerce.number().int().positive().optional()
+});
+
+caseStudyRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    res.set("Cache-Control", `public, max-age=${publicCacheSeconds * 12}`);
+    res.json({ topics: await listCaseStudyTopics() });
+  })
+);
+
 caseStudyRouter.get(
   "/",
   resolveOptionalUser,
-  validate(paginationSchema, "query"),
+  validate(listQuery, "query"),
   asyncHandler(async (req, res) => {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const { items, total } = await listCaseStudies(page, limit);
+    const { page, limit, category } = req.query as unknown as {
+      page: number;
+      limit: number;
+      category?: number;
+    };
+    const { items, total } = await listCaseStudies(page, limit, category);
     res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
     res.json({
       case_studies: items,

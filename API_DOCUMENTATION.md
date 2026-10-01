@@ -470,6 +470,10 @@ Each of the routes below checks that a read was spent on the item (or that the c
 - `GET /v1/podcasts/:podcast_id`
 - `GET /v1/videos/:video_id`
 
+### Topic filters on every Insights and Exclusive list
+
+`GET /v1/{podcasts,videos,webinars,blogs,case-studies,leadership-interviews}/topics` returns `topics[]` of `{ id, name, count }`: the website's Views topics that actually hold items of that kind, counted, in the site's order. A kind whose post type ignores the category filter returns an empty list, so the app shows no filter there. Cached an hour at the edge, twelve on the server. Each of those listings takes an optional `category=<id>`.
+
 ### Podcasts and videos
 
 #### `GET /v1/podcasts`

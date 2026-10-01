@@ -8,7 +8,8 @@ import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import {
   getLeadershipInterview,
-  listLeadershipInterviews
+  listLeadershipInterviews,
+  listLeadershipInterviewTopics
 } from "../services/wordpress.js";
 
 /**
@@ -24,13 +25,30 @@ const interviewParams = z.object({
   interview_id: z.string().trim().regex(/^(?:postid-)?\d+$/i).max(64)
 });
 
+/** `category` narrows to one site topic from /topics. */
+const listQuery = paginationSchema.extend({
+  category: z.coerce.number().int().positive().optional()
+});
+
+leadershipInterviewRouter.get(
+  "/topics",
+  asyncHandler(async (_req, res) => {
+    res.set("Cache-Control", `public, max-age=${publicCacheSeconds * 12}`);
+    res.json({ topics: await listLeadershipInterviewTopics() });
+  })
+);
+
 leadershipInterviewRouter.get(
   "/",
   resolveOptionalUser,
-  validate(paginationSchema, "query"),
+  validate(listQuery, "query"),
   asyncHandler(async (req, res) => {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const { items, total } = await listLeadershipInterviews(page, limit);
+    const { page, limit, category } = req.query as unknown as {
+      page: number;
+      limit: number;
+      category?: number;
+    };
+    const { items, total } = await listLeadershipInterviews(page, limit, category);
     res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
     res.json({
       leadership_interviews: items,
