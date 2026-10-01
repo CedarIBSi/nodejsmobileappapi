@@ -112,14 +112,20 @@ function journalImageUrl(imagePath: string | null): string | null {
  *
  * Same access rule as the listing: this describes gated content.
  */
-journalRouter.get("/filters", ...privateRoute, asyncHandler(async (req, res) => {
+const filtersSchema = z.object({ edition: z.enum(journalEditions).optional() });
+
+journalRouter.get("/filters", ...privateRoute, validate(filtersSchema, "query"), asyncHandler(async (req, res) => {
   await requireJournalAccess(req.appUser!);
+  const { edition } = req.query as unknown as { edition?: JournalEdition };
 
   const published = "WHERE redirect_page IS NOT NULL AND btrim(redirect_page) <> ''";
+  // The years of one edition when asked: the India edition began in 2024,
+  // and a year picker offering 2019 under the India tab finds nothing.
+  const yearScope = edition ? `AND (${editionSql[edition]})` : "";
   const [years, editions] = await Promise.all([
     query<{ year: string }>(
       `SELECT DISTINCT year FROM pv_ibsi_journal_data ${published}
-       AND year IS NOT NULL AND btrim(year) <> ''
+       AND year IS NOT NULL AND btrim(year) <> '' ${yearScope}
        ORDER BY year DESC`
     ),
     query<{ edition_type: string }>(

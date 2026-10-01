@@ -548,6 +548,8 @@ Public marketing/about content; cached for 300 seconds.
 
 Query: `page`, `limit`, optional `year`, `edition` (`india` or `global`, matched by the same word rule the locks use), `edition_type` (the exact CMS string), and `search`. PDF filenames are never returned.
 
+`GET /v1/journals/filters` (same access) returns `years[]` and `editions[]` for the archive; with `edition=india|global` the years are that edition's alone.
+
 Each journal carries `locked` and `locked_reason` (`edition` when the issue's
 edition is not on the reader's plan, `archive` when it predates a monthly
 plan's window, `null` when it opens), and the response carries
