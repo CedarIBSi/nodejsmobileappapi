@@ -4,7 +4,7 @@
 -- fails - emailed_at stays NULL and the lead is not lost.
 CREATE TABLE interest_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES app_users(id) ON DELETE SET NULL,
+  user_id uuid REFERENCES app_users(id) ON DELETE SET NULL,
   -- The page the reader was on: "IBSi Galaxy", "Advisory Services", ...
   topic text NOT NULL,
   -- Copied from the account at the time, so the lead reads the same after
