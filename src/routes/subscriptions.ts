@@ -9,7 +9,12 @@ import { validate } from "../middleware/validate.js";
 import { getGoogleSubscription } from "../services/googlePlay.js";
 import { getAppleSubscription } from "../services/appStore.js";
 import { isProductCode, type ProductCode, products } from "../lib/catalogue.js";
-import { reconcileStoreSubscription, type StoreProvider } from "../lib/subscriptionReconcile.js";
+import { sendPurchaseConfirmation } from "../lib/purchaseEmail.js";
+import {
+  isActiveStoreStatus,
+  reconcileStoreSubscription,
+  type StoreProvider
+} from "../lib/subscriptionReconcile.js";
 import { refreshLapsedSubscription } from "../lib/subscriptionRefresh.js";
 
 export const subscriptionRouter = Router();
@@ -131,8 +136,12 @@ subscriptionRouter.post(
       apple_product_id: string | null;
       google_product_id: string | null;
       id: string;
+      interval: string | null;
+      name: string;
+      product_code: string;
     }>(
-      "SELECT id, apple_product_id, google_product_id FROM subscription_plans WHERE id = $1 AND status = 'active'",
+      `SELECT id, name, product_code, "interval", apple_product_id, google_product_id
+       FROM subscription_plans WHERE id = $1 AND status = 'active'`,
       [body.plan_id]
     );
     const plan = planResult.rows[0];
@@ -175,6 +184,18 @@ subscriptionRouter.post(
       environment = summary.environment;
     }
 
+    // What we knew of this subscription before the reconcile, so the email
+    // below goes out once per purchase and not on every call. The app verifies
+    // a purchase twice within a second - once from the purchase event and once
+    // from its quiet restore - and again on every later restore; only the call
+    // that first records the plan, or records a different plan than before,
+    // is a purchase the reader needs telling about.
+    const before = await query<{ local_plan_id: string }>(
+      `SELECT local_plan_id FROM subscriptions WHERE provider = $1 AND provider_subscription_id = $2`,
+      [provider, providerSubscriptionId]
+    );
+    const previousPlanId = before.rows[0]?.local_plan_id ?? null;
+
     const subscriptionId = await transaction((client) =>
       reconcileStoreSubscription(client, {
         cancelledAt: status === "revoked" || status === "canceled" ? new Date() : null,
@@ -200,5 +221,27 @@ subscriptionRouter.post(
       [subscriptionId]
     );
     res.status(201).json({ subscription: result.rows[0] });
+
+    // After the response: the reader is already subscribed, and the mail can
+    // take a few seconds on a slow relay that the purchase screen should not
+    // wait for. Never throws - see sendPurchaseConfirmation.
+    const readerEmail = req.appUser!.email;
+    if (readerEmail && isActiveStoreStatus(status) && previousPlanId !== plan.id) {
+      void sendPurchaseConfirmation(
+        {
+          currentEnd,
+          environment,
+          interval: plan.interval,
+          kind: previousPlanId ? "changed" : "new",
+          planName: plan.name,
+          productCode: plan.product_code,
+          provider,
+          readerName: req.appUser!.display_name ?? null,
+          to: readerEmail
+        },
+        req.log,
+        subscriptionId
+      );
+    }
   })
 );

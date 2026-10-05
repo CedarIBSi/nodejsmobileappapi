@@ -15,6 +15,12 @@ import { config } from "../config.js";
  */
 
 type Mail = {
+  /**
+   * An HTML rendering of the same message, for the purchase confirmation,
+   * which carries IBSi's own look. `text` stays required and is what a client
+   * that refuses HTML shows, so nothing may appear in one and not the other.
+   */
+  html?: string;
   replyTo?: string;
   subject: string;
   text: string;
@@ -40,10 +46,11 @@ function getTransport(): nodemailer.Transporter {
   return transport;
 }
 
-/** Sends one plain-text message. Throws on any transport failure. */
+/** Sends one message, plain text with an optional HTML part. Throws on any transport failure. */
 export async function sendMail(mail: Mail): Promise<void> {
   await getTransport().sendMail({
     from: config().SMTP_FROM,
+    html: mail.html,
     replyTo: mail.replyTo,
     subject: mail.subject,
     text: mail.text,

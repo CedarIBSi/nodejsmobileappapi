@@ -159,6 +159,9 @@ const schema = z.object({
   SMTP_PASS: z.string().default(""),
   SMTP_FROM: z.string().trim().default(""),
   INTEREST_TO_EMAIL: emailRecipients.default("amitj@ibsintelligence.com"),
+  // Where the purchase confirmation email tells a reader to write. The same
+  // address the app's own Contact support uses.
+  SUPPORT_EMAIL: z.string().trim().email().default("enquiries@ibsintelligence.com"),
   WHITEPAPER_STORAGE_DIR: z
     .string()
     .min(1)

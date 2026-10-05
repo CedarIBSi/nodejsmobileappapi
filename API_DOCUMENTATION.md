@@ -372,6 +372,8 @@ iOS body:
 
 The API never trusts a client-supplied status. It fetches the canonical purchase state from Google or Apple, upserts the subscription, and writes one `entitlements` row per type the plan's product grants (`insights`, `journal_india`, `journal_global`), closing any type the product does not include. `active`, `trialing`, and `in_grace_period` grant access. Webhooks and the lapsed-subscription refresh re-resolve the plan from the product id the store reports, so a plan change made in the store's own UI is reconciled too.
 
+After the response, when the status grants access and the call recorded a plan the subscription did not have before (a first purchase, or a move to another of our plans - not a repeat verification or a renewal), the API emails the caller a purchase confirmation in IBSi's own branding (`src/lib/purchaseEmail.ts`): what the plan includes, the renewal interval and current period end, that the store holds the receipt, how to manage or cancel in that store, and `SUPPORT_EMAIL`. Sandbox purchases get a `[Test]` subject and a no-money-taken note. Sent over the same SMTP as Express interest; a failure is logged with the subscription id and never affects the purchase. Nothing is sent when SMTP is unconfigured or the account has no email.
+
 #### `GET /v1/entitlements/me` — Private
 
 Returns the active entitlement rows, the caller's role, and `access: { insights, journal_editions[] }` — the rows summed up. `employee`, `admin`, and `super_admin` receive synthetic staff rows for every type.

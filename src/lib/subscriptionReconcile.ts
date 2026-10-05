@@ -60,6 +60,11 @@ const activeStatuses = new Set([
   "canceled"
 ]);
 
+/** Whether a store status keeps the subscription's entitlements granted - see activeStatuses. */
+export function isActiveStoreStatus(status: string): boolean {
+  return activeStatuses.has(status);
+}
+
 /**
  * States from which the store will never take money again.
  *
