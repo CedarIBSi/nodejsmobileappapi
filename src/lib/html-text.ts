@@ -1,11 +1,10 @@
 const entityPattern = /&(#\d+|#x[0-9a-f]+|[a-z]+);/gi;
 
 /**
- * A superset of the map held privately in services/wordpress.ts. CMS-authored
- * white paper titles carry typographic dashes and curly quotes, which the
- * narrower map leaves on the page as a literal `&ndash;`. That copy is left
- * alone rather than repointed here, so the news pipeline keeps its current
- * behaviour exactly.
+ * The one entity map for the API. services/wordpress.ts re-exports
+ * decodeEntities from here since 2026-10-05; it used to hold a six-entry map
+ * of its own, which left "&hellip;", "&ndash;" and curly quotes on the page
+ * as literal text in excerpts and titles.
  */
 const namedEntities: Record<string, string> = {
   amp: "&",

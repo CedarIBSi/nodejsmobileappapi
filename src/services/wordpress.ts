@@ -78,30 +78,26 @@ type WordPressPost = {
 
 const listFields = "id,date_gmt,modified_gmt,link,title,content,_links,_embedded";
 const youtubeIdCacheTtlMs = 24 * 60 * 60 * 1000;
-const entityPattern = /&(#\d+|#x[0-9a-f]+|[a-z]+);/gi;
-const namedEntities: Record<string, string> = {
-  amp: "&",
-  apos: "'",
-  gt: ">",
-  lt: "<",
-  nbsp: " ",
-  quot: '"'
-};
-
-export function decodeEntities(value: string): string {
-  return value.replace(entityPattern, (match, entity: string) => {
-    if (entity.startsWith("#x") || entity.startsWith("#X")) {
-      return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
-    }
-    if (entity.startsWith("#")) {
-      return String.fromCodePoint(Number.parseInt(entity.slice(1), 10));
-    }
-    return namedEntities[entity.toLowerCase()] ?? match;
-  });
-}
+// One decoder for the whole API, the one in lib/html-text.ts. This file kept
+// a private six-entry map (amp, apos, gt, lt, nbsp, quot) and so left every
+// other named entity on the page as text: a blog excerpt reached the app
+// ending in a literal "[&hellip;]", and typographic dashes and quotes
+// arrived as "&ndash;" and "&rsquo;". Re-exported so galaxy-content.ts and
+// anything else importing it from here keeps working.
+export { decodeEntities } from "../lib/html-text.js";
+import { decodeEntities } from "../lib/html-text.js";
 
 export function toText(html = ""): string {
   return decodeEntities(html.replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * An excerpt as a line of text. WordPress ends a generated excerpt with its
+ * "more" marker, "[&hellip;]" by default, which is a link affordance on the
+ * website and nothing but brackets in an app. It becomes a plain ellipsis.
+ */
+export function excerptText(html = ""): string {
+  return toText(html).replace(/\s*\[(?:…|\.{3})\]\s*$/u, "…");
 }
 
 /** Keeps paragraph and list breaks so the app can render readable body text. */
@@ -387,7 +383,7 @@ export async function listNews(
     });
 
     const items = posts.map((post) => ({
-      excerpt: toText(post.excerpt?.rendered) || null,
+      excerpt: excerptText(post.excerpt?.rendered) || null,
       id: post.id,
       image_url: featuredImage(post),
       link: post.link ?? "",
@@ -428,7 +424,7 @@ export async function searchNews(
     });
 
     const items = posts.map((post) => ({
-      excerpt: toText(post.excerpt?.rendered) || null,
+      excerpt: excerptText(post.excerpt?.rendered) || null,
       id: post.id,
       image_url: featuredImage(post),
       link: post.link ?? "",
@@ -792,7 +788,7 @@ async function listEditorialPosts(
       });
       return {
         items: posts.map((post) => ({
-          excerpt: toText(post.excerpt?.rendered) || null,
+          excerpt: excerptText(post.excerpt?.rendered) || null,
           id: post.id,
           image_url: featuredImage(post),
           link: post.link ?? "",
@@ -833,7 +829,7 @@ async function getEditorialPost(
       return {
         body,
         body_html: bodyHtml,
-        excerpt: toText(post.excerpt?.rendered) || null,
+        excerpt: excerptText(post.excerpt?.rendered) || null,
         id: post.id,
         image_url: featuredImage(post),
         link: post.link ?? "",
