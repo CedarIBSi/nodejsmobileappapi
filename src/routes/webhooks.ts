@@ -5,7 +5,14 @@ import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
 import { getGoogleSubscription, verifyPubSubPushToken } from "../services/googlePlay.js";
 import { decodeAppleTransaction, mapAppleStatus, verifyAppleNotification } from "../services/appStore.js";
+import { notifySubscriptionChange, type SubscriptionTransition } from "../lib/purchaseEmail.js";
 import { planIdForStoreProduct, reconcileStoreSubscription } from "../lib/subscriptionReconcile.js";
+
+// What a handler's transaction hands back: the outcome for the response, and
+// the row change for the email that may follow it. The email goes after the
+// commit, never inside the transaction - a slow relay must not hold a row
+// lock, and a mail failure must not roll back a store notification.
+type WebhookOutcome = { status: "duplicate" | "ignored" | "processed"; transition?: SubscriptionTransition };
 
 // Store webhooks only: Google Play RTDN and Apple App Store server
 // notifications, both verified before anything is written.
@@ -55,14 +62,15 @@ webhookRouter.post("/google-play", asyncHandler(async (req, res) => {
   const eventId = message.messageId ?? crypto.randomUUID();
   const eventType = String(notification.subscriptionNotification?.notificationType ?? "unknown");
 
-  const outcome = await transaction(async (client) => {
+  const outcome = await transaction<WebhookOutcome>(async (client) => {
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO store_events (provider, provider_event_id, event_type, provider_subscription_id, payload_json)
        VALUES ('google_play', $1, $2, $3, $4::jsonb)
        ON CONFLICT (provider, provider_event_id) DO NOTHING RETURNING id`,
       [eventId, eventType, purchaseToken, JSON.stringify(notification)]
     );
-    if (!inserted.rowCount) return "duplicate";
+    if (!inserted.rowCount) return { status: "duplicate" };
+    let transition: SubscriptionTransition | undefined;
 
     if (purchaseToken) {
       // Only a purchase already confirmed through POST /verify-purchase can
@@ -70,8 +78,8 @@ webhookRouter.post("/google-play", asyncHandler(async (req, res) => {
       // identifier of its own. A notification arriving first (a race with
       // verify-purchase, or for a purchase this backend never saw) is
       // recorded in store_events for later reconciliation, not dropped.
-      const existing = await client.query<{ id: string; local_plan_id: string; user_id: string }>(
-        `SELECT id, user_id, local_plan_id FROM subscriptions
+      const existing = await client.query<{ id: string; local_plan_id: string; status: string; user_id: string }>(
+        `SELECT id, user_id, local_plan_id, status FROM subscriptions
          WHERE provider = 'google_play' AND provider_subscription_id = $1 FOR UPDATE`,
         [purchaseToken]
       );
@@ -86,29 +94,42 @@ webhookRouter.post("/google-play", asyncHandler(async (req, res) => {
         // same "treat it as a signal to look up the real state" approach
         // getGoogleSubscription documents.
         const summary = await getGoogleSubscription(purchaseToken);
+        // The product Play now reports, in case the reader changed plan in
+        // the Play Store rather than in the app; the stored plan otherwise.
+        const planId =
+          (await planIdForStoreProduct(client, "google_play", summary.productId)) ?? local.local_plan_id;
+        const environment = summary.isTestPurchase ? "sandbox" : "production";
         await reconcileStoreSubscription(client, {
           cancelledAt: summary.state === "canceled" ? new Date() : null,
           currentEnd: summary.currentEnd,
           currentStart: summary.currentStart,
-          environment: summary.isTestPurchase ? "sandbox" : "production",
-          // The product Play now reports, in case the reader changed plan in
-          // the Play Store rather than in the app; the stored plan otherwise.
-          planId:
-            (await planIdForStoreProduct(client, "google_play", summary.productId)) ??
-            local.local_plan_id,
+          environment,
+          planId,
           provider: "google_play",
           providerSubscriptionId: purchaseToken,
           status: summary.state,
           userId: local.user_id
         });
+        transition = {
+          currentEnd: summary.currentEnd,
+          environment,
+          planId,
+          previousPlanId: local.local_plan_id,
+          previousStatus: local.status,
+          provider: "google_play",
+          status: summary.state,
+          subscriptionId: local.id,
+          userId: local.user_id
+        };
       }
     }
 
     await client.query("UPDATE store_events SET processed_at = now() WHERE id = $1", [inserted.rows[0]!.id]);
-    return "processed";
+    return { status: "processed", transition };
   });
 
-  res.json({ received: true, status: outcome });
+  res.json({ received: true, status: outcome.status });
+  if (outcome.transition) void notifySubscriptionChange(outcome.transition, req.log);
 }));
 
 // App Store Server Notifications V2 post a single top-level `signedPayload`
@@ -138,18 +159,19 @@ webhookRouter.post("/apple", asyncHandler(async (req, res) => {
     notification.notificationUUID ?? crypto.createHash("sha256").update(req.body).digest("hex");
   const eventType = String(notification.notificationType ?? "unknown");
 
-  const outcome = await transaction(async (client) => {
+  const outcome = await transaction<WebhookOutcome>(async (client) => {
     const inserted = await client.query<{ id: string }>(
       `INSERT INTO store_events (provider, provider_event_id, event_type, provider_subscription_id, payload_json)
        VALUES ('apple', $1, $2, $3, $4::jsonb)
        ON CONFLICT (provider, provider_event_id) DO NOTHING RETURNING id`,
       [eventId, eventType, originalTransactionId, JSON.stringify(notification)]
     );
-    if (!inserted.rowCount) return "duplicate";
+    if (!inserted.rowCount) return { status: "duplicate" };
+    let transition: SubscriptionTransition | undefined;
 
     if (originalTransactionId && notification.data?.status !== undefined) {
-      const existing = await client.query<{ id: string; local_plan_id: string; user_id: string }>(
-        `SELECT id, user_id, local_plan_id FROM subscriptions
+      const existing = await client.query<{ id: string; local_plan_id: string; status: string; user_id: string }>(
+        `SELECT id, user_id, local_plan_id, status FROM subscriptions
          WHERE provider = 'apple' AND provider_subscription_id = $1 FOR UPDATE`,
         [originalTransactionId]
       );
@@ -161,27 +183,41 @@ webhookRouter.post("/apple", asyncHandler(async (req, res) => {
           local.user_id
         ]);
         const state = mapAppleStatus(notification.data.status);
+        const currentEnd = decodedTransaction?.expiresDate ? new Date(decodedTransaction.expiresDate) : null;
+        const environment = notification.data.environment === "Production" ? "production" : "sandbox";
+        // Within one subscription group Apple moves a reader between our
+        // products on its own and reports the new product id here.
+        const planId =
+          (await planIdForStoreProduct(client, "apple", decodedTransaction?.productId)) ?? local.local_plan_id;
         await reconcileStoreSubscription(client, {
           cancelledAt: state === "revoked" ? new Date() : null,
-          currentEnd: decodedTransaction?.expiresDate ? new Date(decodedTransaction.expiresDate) : null,
+          currentEnd,
           currentStart: null,
-          environment: notification.data.environment === "Production" ? "production" : "sandbox",
-          // Within one subscription group Apple moves a reader between our
-          // products on its own and reports the new product id here.
-          planId:
-            (await planIdForStoreProduct(client, "apple", decodedTransaction?.productId)) ??
-            local.local_plan_id,
+          environment,
+          planId,
           provider: "apple",
           providerSubscriptionId: originalTransactionId,
           status: state,
           userId: local.user_id
         });
+        transition = {
+          currentEnd,
+          environment,
+          planId,
+          previousPlanId: local.local_plan_id,
+          previousStatus: local.status,
+          provider: "apple",
+          status: state,
+          subscriptionId: local.id,
+          userId: local.user_id
+        };
       }
     }
 
     await client.query("UPDATE store_events SET processed_at = now() WHERE id = $1", [inserted.rows[0]!.id]);
-    return "processed";
+    return { status: "processed", transition };
   });
 
-  res.json({ received: true, status: outcome });
+  res.json({ received: true, status: outcome.status });
+  if (outcome.transition) void notifySubscriptionChange(outcome.transition, req.log);
 }));

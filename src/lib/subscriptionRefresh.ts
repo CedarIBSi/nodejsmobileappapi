@@ -1,6 +1,7 @@
 import { query, transaction } from "../db/pool.js";
 import { getAppleSubscription } from "../services/appStore.js";
 import { getGoogleSubscription } from "../services/googlePlay.js";
+import { notifySubscriptionChange } from "./purchaseEmail.js";
 import {
   planIdForStoreProduct,
   reconcileStoreSubscription,
@@ -150,20 +151,44 @@ export async function refreshLapsedSubscription(userId: string): Promise<boolean
       productId = summary.productId;
     }
 
-    await transaction(async (client) =>
-      reconcileStoreSubscription(client, {
+    const planId = await transaction(async (client) => {
+      // The product the store reports now, in case the reader changed plan
+      // in the store's own UI; the stored plan otherwise.
+      const resolvedPlanId = (await planIdForStoreProduct(client, provider, productId)) ?? row.local_plan_id;
+      await reconcileStoreSubscription(client, {
         cancelledAt: status === "revoked" || status === "canceled" ? new Date() : null,
         currentEnd,
         currentStart,
         environment,
-        // The product the store reports now, in case the reader changed plan
-        // in the store's own UI; the stored plan otherwise.
-        planId: (await planIdForStoreProduct(client, provider, productId)) ?? row.local_plan_id,
+        planId: resolvedPlanId,
         provider,
         providerSubscriptionId,
         status,
         userId
-      })
+      });
+      return resolvedPlanId;
+    });
+
+    // This path is the backstop for a webhook that never arrived, so a lapse
+    // it discovers is one the reader has not been told about. After the
+    // commit, never throws; console because no request logger reaches here.
+    void notifySubscriptionChange(
+      {
+        currentEnd,
+        environment,
+        planId,
+        previousPlanId: row.local_plan_id,
+        previousStatus: row.status,
+        provider,
+        status,
+        subscriptionId: row.id,
+        userId
+      },
+      {
+        error: (obj, msg) => console.error("[subscriptionRefresh]", msg, obj),
+        info: (obj, msg) => console.info("[subscriptionRefresh]", msg, obj),
+        warn: (obj, msg) => console.warn("[subscriptionRefresh]", msg, obj)
+      }
     );
 
     return true;
