@@ -51,7 +51,25 @@ function updatePreview() {
 }
 
 async function loadArticles() {
-  const { articles } = await api("/articles?limit=30");
+  let articles;
+  try {
+    ({ articles } = await api("/articles?limit=30"));
+  } catch (error) {
+    // News is public and remains useful even if the admin-only Sent-badge
+    // lookup has a transient problem. The database unique index still blocks
+    // an accidental duplicate when Send is pressed.
+    const response = await fetch("/v1/news?page=1&limit=30");
+    if (!response.ok) throw error;
+    const fallback = await response.json();
+    articles = (fallback.articles || []).map((article) => ({
+      id: String(article.id),
+      headline: article.title,
+      image_url: article.image_url,
+      published_at: article.published_at,
+      already_notified: false
+    }));
+    status("Latest news loaded; Sent badges are temporarily unavailable.", true);
+  }
   $("articles").innerHTML = "";
   for (const article of articles) {
     const row = document.createElement("div"); row.className = "row";
@@ -147,6 +165,12 @@ else onAuthStateChanged(auth, async (user) => {
     const { user: profile } = await authApi("/me");
     $("identity").textContent = profile.display_name || profile.email || "Signed in"; $("role").textContent = profile.role;
     if (!["admin", "super_admin"].includes(profile.role)) { $("denied").hidden = false; return; }
-    $("console").hidden = false; updatePreview(); await Promise.all([loadArticles(), loadHistory(), countAudience()]);
+    $("console").hidden = false;
+    updatePreview();
+    const initial = await Promise.allSettled([loadArticles(), loadHistory(), countAudience()]);
+    const failed = initial.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") {
+      status(`One console panel could not load: ${failed.reason?.message || "Unknown error"}`, true);
+    }
   } catch (error) { $("auth-error").textContent = error.message; $("sign-in").hidden = false; }
 });

@@ -110,12 +110,20 @@ notificationConsoleRouter.get(
     const { limit } = req.query as unknown as { limit: number };
     const { items } = await listNews(1, limit);
     const ids = items.map((item) => String(item.id));
-    const sent = ids.length
-      ? await query<{ article_id: string }>(
+    // Sent badges are useful but not worth taking the editorial feed down for.
+    // A transient database/read error is logged and the articles still load;
+    // sending remains protected by the unique index itself.
+    let sent: { rows: Array<{ article_id: string }> } = { rows: [] };
+    if (ids.length) {
+      try {
+        sent = await query<{ article_id: string }>(
           "SELECT article_id FROM push_broadcasts WHERE article_id = ANY($1::text[])",
           [ids]
-        )
-      : { rows: [] };
+        );
+      } catch (error) {
+        req.log.error({ err: error }, "Could not load notification Sent badges");
+      }
+    }
     const notified = new Set(sent.rows.map((row) => row.article_id));
     res.json({
       articles: items.map((item) => ({
