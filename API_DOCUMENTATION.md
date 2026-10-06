@@ -726,12 +726,13 @@ Returns the target, accepted, delivered and failed counts for a broadcast.
 
 #### Push notification console — Admin only
 
-`GET /admin/notifications` serves the editorial console. Configure the public
-Firebase Web SDK identifiers `FIREBASE_WEB_API_KEY` and
-`FIREBASE_WEB_APP_ID`, and add `api.ibsintelligence.com` to Firebase
-Authentication -> Settings -> Authorised domains. Google and Microsoft
-sign-in still produce a Firebase ID token; every API operation verifies it and
-requires the database role `admin` or `super_admin`.
+`GET /admin/notifications` serves the editorial console. The API reads the
+public Firebase Web SDK identifiers through its existing Admin credential and
+caches them; `FIREBASE_WEB_API_KEY` and `FIREBASE_WEB_APP_ID` are optional
+overrides only. Add `api.ibsintelligence.com` to Firebase Authentication ->
+Settings -> Authorised domains. Google and Microsoft sign-in still produce a
+Firebase ID token; every API operation verifies it and requires the database
+role `admin` or `super_admin`.
 
 Migration `034_push_notification_console.sql` renames
 `article_push_broadcasts` to `push_broadcasts` and adds general messages,

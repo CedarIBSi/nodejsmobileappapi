@@ -34,6 +34,7 @@ import { authActionRouter } from "./routes/auth-action.js";
 import { subscriptionRouter } from "./routes/subscriptions.js";
 import { webhookRouter } from "./routes/webhooks.js";
 import { errorHandler, notFound } from "./middleware/error-handler.js";
+import { firebaseWebConfig } from "./services/firebase.js";
 
 export function createApp() {
   const app = express();
@@ -84,15 +85,13 @@ export function createApp() {
 
   // These are public Firebase client identifiers, never service-account
   // credentials. Every mutation still verifies the ID token and admin role.
-  app.get("/admin/firebase-config.js", (_req, res) => {
-    res.type("application/javascript").send(
-      `window.__FIREBASE_CONFIG__=${JSON.stringify({
-        apiKey: env.FIREBASE_WEB_API_KEY,
-        appId: env.FIREBASE_WEB_APP_ID || undefined,
-        authDomain: env.FIREBASE_AUTH_DOMAIN,
-        projectId: env.FIREBASE_PROJECT_ID
-      })};`
-    );
+  app.get("/admin/firebase-config.js", async (req, res, next) => {
+    try {
+      const web = await firebaseWebConfig();
+      res.type("application/javascript").send(`window.__FIREBASE_CONFIG__=${JSON.stringify(web)};`);
+    } catch (error) {
+      next(error);
+    }
   });
   const publicAdmin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public/admin");
   app.use("/admin", express.static(publicAdmin));

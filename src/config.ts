@@ -62,8 +62,8 @@ const schema = z.object({
   FIREBASE_PROJECT_ID: z.string().min(1),
   FIREBASE_AUTH_DOMAIN: z.string().regex(/^[a-z0-9.-]+$/i).optional(),
   // Public Firebase Web SDK settings for the browser notification console.
-  FIREBASE_WEB_API_KEY: z.string().trim().default("AIzaSyBzklH7M8JNUgOJnlHoZbxZioRJJ2eUICc"),
-  FIREBASE_WEB_APP_ID: z.string().trim().default("1:394834075189:web:6ad7c41094af9fd9a65b7c"),
+  FIREBASE_WEB_API_KEY: z.string().trim().default(""),
+  FIREBASE_WEB_APP_ID: z.string().trim().default(""),
   FIREBASE_CLIENT_EMAIL: z.string().email(),
   FIREBASE_PRIVATE_KEY: z.string().min(1),
   FIREBASE_SERVICE_ACCOUNT_FILE: z.string().default(""),
