@@ -60,7 +60,11 @@ export function createApp() {
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     contentSecurityPolicy: {
       directives: {
-        scriptSrc: ["'self'", "https://www.gstatic.com"],
+        // Firebase Auth imports its modules from gstatic, then loads Google's
+        // gapi iframe helper from apis.google.com when an OAuth provider is
+        // opened. Blocking the second script surfaces only as the unhelpful
+        // Firebase `auth/internal-error`.
+        scriptSrc: ["'self'", "https://www.gstatic.com", "https://apis.google.com"],
         connectSrc: [
           "'self'",
           "https://identitytoolkit.googleapis.com",
