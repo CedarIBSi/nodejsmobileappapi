@@ -53,10 +53,21 @@ export function createApp() {
     }
   }));
   app.use(helmet({
+    // Firebase Auth uses Google/Microsoft popups which must communicate their
+    // result back to this page. Helmet's stricter default isolates the popup
+    // and leaves signInWithPopup hanging.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     contentSecurityPolicy: {
       directives: {
         scriptSrc: ["'self'", "https://www.gstatic.com"],
-        connectSrc: ["'self'", "https://identitytoolkit.googleapis.com", "https://securetoken.googleapis.com"],
+        connectSrc: [
+          "'self'",
+          "https://identitytoolkit.googleapis.com",
+          "https://securetoken.googleapis.com",
+          "https://www.googleapis.com",
+          "https://accounts.google.com",
+          "https://*.firebaseapp.com"
+        ],
         frameSrc: ["'self'", "https://accounts.google.com", "https://*.firebaseapp.com", "https://login.microsoftonline.com"],
         imgSrc: ["'self'", "data:", "https:"]
       }
