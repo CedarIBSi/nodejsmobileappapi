@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth, getRedirectResult, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signInWithRedirect, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const $ = (id) => document.getElementById(id);
 const config = window.__FIREBASE_CONFIG__ || {};
@@ -121,14 +121,24 @@ $("target-type").addEventListener("change", () => { $("target-value-wrap").hidde
 $("audience").addEventListener("change", countAudience);
 $("message-preview").addEventListener("click", async () => { try { status("Sending preview…"); const result = await api("/preview", { method: "POST", body: JSON.stringify(messageBody()) }); status(`Preview accepted on ${result.sent} device(s).`); } catch (error) { status(error.message, true); } });
 $("message-send").addEventListener("click", async () => { try { status("Submitting…"); await confirmedBroadcast(messageBody(), `${$("title").value}\n${$("body").value}`); status($("scheduled-at").value ? "Notification scheduled." : "Notification accepted."); await loadHistory(); } catch (error) { status(error.message, true); } });
-$("google").addEventListener("click", () => auth && signInWithRedirect(auth, new GoogleAuthProvider()).catch((error) => $("auth-error").textContent = error.message));
-$("microsoft").addEventListener("click", () => auth && signInWithRedirect(auth, new OAuthProvider("microsoft.com")).catch((error) => $("auth-error").textContent = error.message));
+$("google").addEventListener("click", async () => {
+  if (!auth) return;
+  $("auth-error").textContent = "";
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  try { await signInWithPopup(auth, provider); }
+  catch (error) { $("auth-error").textContent = `${error.code || "auth/error"}: ${error.message}`; }
+});
+$("microsoft").addEventListener("click", async () => {
+  if (!auth) return;
+  $("auth-error").textContent = "";
+  try { await signInWithPopup(auth, new OAuthProvider("microsoft.com")); }
+  catch (error) { $("auth-error").textContent = `${error.code || "auth/error"}: ${error.message}`; }
+});
 $("sign-out").addEventListener("click", () => auth && signOut(auth));
 
 if (!auth) $("auth-error").textContent = "Firebase Web API settings are not configured on this server.";
-else {
-getRedirectResult(auth).catch((error) => { $("auth-error").textContent = error.message; });
-onAuthStateChanged(auth, async (user) => {
+else onAuthStateChanged(auth, async (user) => {
   $("sign-in").hidden = Boolean(user); $("sign-out").hidden = !user; $("console").hidden = true; $("denied").hidden = true;
   if (!user) return;
   try {
@@ -140,4 +150,3 @@ onAuthStateChanged(auth, async (user) => {
     $("console").hidden = false; updatePreview(); await Promise.all([loadArticles(), loadHistory(), countAudience()]);
   } catch (error) { $("auth-error").textContent = error.message; $("sign-in").hidden = false; }
 });
-}
