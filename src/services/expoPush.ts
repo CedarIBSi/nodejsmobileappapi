@@ -1,13 +1,20 @@
 import { config } from "../config.js";
 import { query, transaction } from "../db/pool.js";
-import { getArticleMetadata } from "./wordpress.js";
+import { runDueBroadcasts } from "./pushBroadcast.js";
+export { broadcastArticle } from "./pushBroadcast.js";
 
 const SEND_URL = "https://exp.host/--/api/v2/push/send";
 const RECEIPTS_URL = "https://exp.host/--/api/v2/push/getReceipts";
 const BATCH_SIZE = 100;
 const tokenPattern = /^(?:ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/;
 
-export type PushMessageInput = { title: string; body: string; data?: Record<string, unknown> };
+export type PushMessageInput = {
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  richContent?: { image: string };
+  sound?: "default";
+};
 type TokenRow = { id: string; expo_push_token: string };
 type Ticket = { status: "ok" | "error"; id?: string; message?: string; details?: { error?: string } };
 type Receipt = { status: "ok" | "error"; message?: string; details?: { error?: string } };
@@ -84,94 +91,6 @@ export async function sendPushNotificationToUser(
   return { sent, failed };
 }
 
-export async function broadcastArticle(input: {
-  articleId: string;
-  headline?: string;
-  summary?: string;
-  imageUrl?: string;
-  requestedBy: string;
-}) {
-  const suppliedHeadline = input.headline?.trim();
-  const metadata = !suppliedHeadline || !input.imageUrl
-    ? await getArticleMetadata(input.articleId)
-    : null;
-  const headline = suppliedHeadline || metadata?.headline;
-  const imageUrl = input.imageUrl || metadata?.image_url || undefined;
-  if (!headline) {
-    const error = new Error("The article headline could not be resolved from WordPress");
-    Object.assign(error, { status: 422, code: "ARTICLE_METADATA_UNAVAILABLE" });
-    throw error;
-  }
-
-  const created = await query<{ id: string }>(
-    `INSERT INTO article_push_broadcasts (article_id, headline, summary, image_url, requested_by)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT (article_id) DO NOTHING RETURNING id`,
-    [input.articleId, headline, input.summary ?? null, imageUrl ?? null, input.requestedBy]
-  );
-  const broadcastId = created.rows[0]?.id;
-  if (!broadcastId) {
-    const error = new Error("A notification has already been sent for this article");
-    Object.assign(error, { status: 409, code: "ARTICLE_ALREADY_NOTIFIED" });
-    throw error;
-  }
-
-  const result = await query<TokenRow>("SELECT id, expo_push_token FROM push_tokens ORDER BY id");
-  const valid = result.rows.filter((row) => tokenPattern.test(row.expo_push_token));
-  const stale = result.rows.filter((row) => !tokenPattern.test(row.expo_push_token)).map((row) => row.id);
-  let accepted = 0;
-  let failed = result.rows.length - valid.length;
-  await query("UPDATE article_push_broadcasts SET target_count = $2 WHERE id = $1", [broadcastId, result.rows.length]);
-
-  const message = {
-    title: "IBS Intelligence",
-    body: headline,
-    sound: "default",
-    ...(imageUrl ? { richContent: { image: imageUrl } } : {}),
-    data: { type: "news_article", article_id: input.articleId, ...(imageUrl ? { image_url: imageUrl } : {}) }
-  };
-
-  try {
-    const batches = chunks(valid, BATCH_SIZE);
-    for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
-      const batch = batches[batchIndex]!;
-      const payload = (await expoRequest(SEND_URL, batch.map((row) => ({ to: row.expo_push_token, ...message })))) as { data?: Ticket[] };
-      await transaction(async (client) => {
-        for (let index = 0; index < batch.length; index += 1) {
-          const row = batch[index]!;
-          const ticket = payload.data?.[index];
-          if (ticket?.status === "ok" && ticket.id) {
-            accepted += 1;
-            await client.query(
-              `INSERT INTO expo_push_receipts (ticket_id, broadcast_id, push_token_id, next_check_at)
-               VALUES ($1, $2, $3, now() + ($4 * interval '1 second'))`,
-              [ticket.id, broadcastId, row.id, config().EXPO_RECEIPT_DELAY_SECONDS]
-            );
-          } else {
-            failed += 1;
-            if (ticket?.details?.error === "DeviceNotRegistered") stale.push(row.id);
-          }
-        }
-      });
-      if (batchIndex + 1 < batches.length) await delay(config().EXPO_PUSH_BATCH_INTERVAL_MS);
-    }
-  } catch (error) {
-    // Everything not accepted is failed/unattempted at this point. Assigning
-    // rather than adding avoids double-counting ticket-level failures from
-    // batches that completed before a later batch-level outage.
-    failed = result.rows.length - accepted;
-    console.error("[expoPush] article broadcast interrupted", { broadcastId, error: error instanceof Error ? error.message : String(error) });
-  }
-
-  await deleteTokens(stale);
-  const status = accepted === 0 ? "failed" : failed ? "partial" : "accepted";
-  await query(
-    `UPDATE article_push_broadcasts SET status = $2, accepted_count = $3, failed_count = $4,
-       completed_at = now(), updated_at = now() WHERE id = $1`,
-    [broadcastId, status, accepted, failed]
-  );
-  return { broadcast_id: broadcastId, status, target_count: result.rows.length, accepted_count: accepted, failed_count: failed };
-}
-
 let checkingReceipts = false;
 export async function checkPendingExpoReceipts(): Promise<number> {
   if (checkingReceipts) return 0;
@@ -209,7 +128,7 @@ export async function checkPendingExpoReceipts(): Promise<number> {
     await deleteTokens(stale);
     for (const broadcastId of new Set(pending.rows.map((row) => row.broadcast_id))) {
       await query(
-        `UPDATE article_push_broadcasts b SET delivered_count = x.delivered,
+        `UPDATE push_broadcasts b SET delivered_count = x.delivered,
          failed_count = (b.target_count - b.accepted_count) + x.failed, updated_at = now()
          FROM (SELECT count(*) FILTER (WHERE status='delivered')::int delivered,
          count(*) FILTER (WHERE status='failed')::int failed FROM expo_push_receipts WHERE broadcast_id=$1) x
@@ -221,12 +140,23 @@ export async function checkPendingExpoReceipts(): Promise<number> {
 }
 
 let receiptTimer: NodeJS.Timeout | undefined;
+let scheduleTimer: NodeJS.Timeout | undefined;
 export function startExpoReceiptWorker(): () => void {
-  if (receiptTimer) return () => undefined;
+  if (receiptTimer || scheduleTimer) return () => undefined;
   const run = () => void checkPendingExpoReceipts().catch((error) =>
     console.error("[expoPush] receipt check failed", { error: error instanceof Error ? error.message : String(error) }));
+  const runSchedule = () => void runDueBroadcasts().catch((error) =>
+    console.error("[expoPush] scheduled broadcast failed", { error: error instanceof Error ? error.message : String(error) }));
   receiptTimer = setInterval(run, 60_000);
+  scheduleTimer = setInterval(runSchedule, 30_000);
   receiptTimer.unref();
+  scheduleTimer.unref();
   setTimeout(run, 10_000).unref();
-  return () => { if (receiptTimer) clearInterval(receiptTimer); receiptTimer = undefined; };
+  setTimeout(runSchedule, 5_000).unref();
+  return () => {
+    if (receiptTimer) clearInterval(receiptTimer);
+    if (scheduleTimer) clearInterval(scheduleTimer);
+    receiptTimer = undefined;
+    scheduleTimer = undefined;
+  };
 }

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>IBSi Push Console</title>
+  <link rel="stylesheet" href="/admin/notifications/styles.css">
+</head>
+<body>
+  <header><div><strong>IBSi</strong><span>Push notification console</span></div><button id="sign-out" hidden>Sign out</button></header>
+  <main>
+    <section id="sign-in" class="card auth">
+      <h1>Send a notification</h1><p>Sign in with your IBSi work account.</p>
+      <div class="actions"><button id="google">Continue with Google</button><button id="microsoft">Continue with Microsoft</button></div>
+      <p id="auth-error" class="error"></p>
+    </section>
+    <section id="denied" class="card" hidden><h1>Sending rights required</h1><p>Ask an administrator for sending rights.</p></section>
+    <section id="console" hidden>
+      <div class="identity"><span id="identity"></span><span id="role" class="badge"></span></div>
+      <nav><button data-tab="news" class="active">News</button><button data-tab="message">Message</button><button data-tab="history">History</button></nav>
+      <div class="workspace">
+        <section class="card panel" id="news-panel"><h2>Latest news</h2><div id="articles" class="list"><p>Loading…</p></div></section>
+        <section class="card panel" id="message-panel" hidden>
+          <h2>Message</h2>
+          <label>Title <span id="title-count">0 / 65</span><input id="title" maxlength="200" value="IBS Intelligence"></label>
+          <label>Body <span id="body-count">0 / 240</span><textarea id="body" maxlength="1000" rows="5"></textarea></label>
+          <label>Image URL <input id="image" type="url" placeholder="https://…"></label>
+          <label>Opens <select id="target-type"><option value="screen:news">News</option><option value="screen:exclusive">Exclusive</option><option value="screen:journal">Journal</option><option value="screen:subscribe">Subscribe</option><option value="screen:events">Events</option><option value="screen:about">About</option><option value="article">Article ID</option><option value="url">Web URL</option></select></label>
+          <label id="target-value-wrap" hidden>Target <input id="target-value"></label>
+          <label>Audience <select id="audience"><option value='{"type":"all"}'>Everyone</option><option value='{"type":"platform","platform":"ios"}'>iOS</option><option value='{"type":"platform","platform":"android"}'>Android</option><option value='{"type":"subscribers"}'>Subscribers</option><option value='{"type":"free"}'>Free readers</option><option value='{"type":"entitlement","entitlement_type":"insights"}'>Insights subscribers</option><option value='{"type":"entitlement","entitlement_type":"journal_india"}'>India Journal</option><option value='{"type":"entitlement","entitlement_type":"journal_global"}'>Global Journal</option></select><small id="audience-count">Counting devices…</small></label>
+          <label>Send at <input id="scheduled-at" type="datetime-local"><small>Leave blank to send now.</small></label>
+          <div class="actions"><button id="message-preview" class="secondary">Send to me</button><button id="message-send">Send to everyone</button></div>
+        </section>
+        <section class="card panel" id="history-panel" hidden><h2>History</h2><div id="history" class="list"><p>Loading…</p></div></section>
+        <aside class="card preview"><h2>Preview</h2><div class="phone"><div class="notification"><div class="app-icon">I</div><div><strong id="preview-title">IBS Intelligence</strong><p id="preview-body">Choose an article or write a message.</p><img id="preview-image" hidden></div></div></div><p id="status"></p></aside>
+      </div>
+    </section>
+  </main>
+  <script src="/admin/firebase-config.js"></script>
+  <script type="module" src="/admin/notifications/app.js"></script>
+</body>
+</html>

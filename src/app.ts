@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -23,6 +25,7 @@ import { journalRouter } from "./routes/journals.js";
 import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
 import { notificationRouter } from "./routes/notifications.js";
+import { notificationConsoleRouter } from "./routes/notification-console.js";
 import { analystOpinionRouter } from "./routes/analyst-opinions.js";
 import { caseStudyRouter } from "./routes/case-studies.js";
 import { leadershipInterviewRouter } from "./routes/leadership-interviews.js";
@@ -49,7 +52,16 @@ export function createApp() {
           req.url?.startsWith("/auth/action")) ?? false
     }
   }));
-  app.use(helmet());
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        scriptSrc: ["'self'", "https://www.gstatic.com"],
+        connectSrc: ["'self'", "https://identitytoolkit.googleapis.com", "https://securetoken.googleapis.com"],
+        frameSrc: ["'self'", "https://accounts.google.com", "https://*.firebaseapp.com", "https://login.microsoftonline.com"],
+        imgSrc: ["'self'", "data:", "https:"]
+      }
+    }
+  }));
   const origins = env.CORS_ORIGINS.split(",").map((item) => item.trim()).filter(Boolean);
   app.use(cors({ origin: origins.length ? origins : true, credentials: true }));
   app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-8", legacyHeaders: false }));
@@ -58,6 +70,21 @@ export function createApp() {
   // so the webhook router gets the raw body rather than parsed JSON.
   app.use("/v1/webhooks", express.raw({ type: "application/json", limit: "1mb" }), webhookRouter);
   app.use(express.json({ limit: "1mb" }));
+
+  // These are public Firebase client identifiers, never service-account
+  // credentials. Every mutation still verifies the ID token and admin role.
+  app.get("/admin/firebase-config.js", (_req, res) => {
+    res.type("application/javascript").send(
+      `window.__FIREBASE_CONFIG__=${JSON.stringify({
+        apiKey: env.FIREBASE_WEB_API_KEY,
+        appId: env.FIREBASE_WEB_APP_ID || undefined,
+        authDomain: env.FIREBASE_AUTH_DOMAIN,
+        projectId: env.FIREBASE_PROJECT_ID
+      })};`
+    );
+  });
+  const publicAdmin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public/admin");
+  app.use("/admin", express.static(publicAdmin));
 
   app.get("/", (_req, res) => {
     res.json({
@@ -119,6 +146,7 @@ export function createApp() {
   app.use("/v1/entitlements", entitlementRouter);
   app.use("/v1/push-token", pushTokenRouter);
   app.use("/v1/notifications", notificationRouter);
+  app.use("/v1/notifications", notificationConsoleRouter);
   app.use("/v1/news", newsRouter);
   app.use("/v1/galaxy", galaxyRouter);
   app.use("/v1/awards", awardsRouter);

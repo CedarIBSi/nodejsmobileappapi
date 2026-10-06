@@ -724,6 +724,33 @@ store Expo tickets for delayed receipt checking. Tokens reported as
 
 Returns the target, accepted, delivered and failed counts for a broadcast.
 
+#### Push notification console — Admin only
+
+`GET /admin/notifications` serves the editorial console. Configure the public
+Firebase Web SDK identifiers `FIREBASE_WEB_API_KEY` and
+`FIREBASE_WEB_APP_ID`, and add `api.ibsintelligence.com` to Firebase
+Authentication -> Settings -> Authorised domains. Google and Microsoft
+sign-in still produce a Firebase ID token; every API operation verifies it and
+requires the database role `admin` or `super_admin`.
+
+Migration `034_push_notification_console.sql` renames
+`article_push_broadcasts` to `push_broadcasts` and adds general messages,
+audiences, scheduling, and cancellation. Apply it before deploying this API.
+
+- `GET /v1/notifications/articles?limit=30`: recent news with `already_notified`.
+- `POST /v1/notifications/preview`: send only to the caller and record nothing.
+- `POST /v1/notifications/broadcast`: send or schedule an article/message.
+  Requires `confirm: true`; the fourth broadcast in 24 hours also requires
+  `confirm_cap: true` after a `429 DAILY_CAP` response.
+- `GET /v1/notifications/audience-count?audience=<JSON>`: device and distinct
+  user counts for all, platform, subscribers, free users, or one entitlement.
+- `GET /v1/notifications/broadcasts?limit=50`: newest-first audit history.
+- `DELETE /v1/notifications/broadcasts/:id`: cancel a scheduled row only.
+
+The scheduler polls every 30 seconds. Article payloads are unchanged. Message
+payloads target a known screen, a news article, or an HTTPS URL. The legacy
+article POST and single-broadcast GET remain available.
+
 The mobile app controls the IBSI notification icon. It must also handle a
 notification tap by navigating to the ID provided in `data.article_id`.
 

@@ -67,9 +67,13 @@ notificationRouter.get("/article/:broadcastId", ...privateRoute, asyncHandler(as
     throw new HttpError(403, "Admin role required", "FORBIDDEN");
   }
   const result = await query(
-    `SELECT id, article_id, headline, status, target_count, accepted_count,
-            delivered_count, failed_count, created_at, completed_at, updated_at
-       FROM article_push_broadcasts WHERE id = $1`,
+    `SELECT b.id, b.kind, b.article_id, b.headline, b.title, b.body, b.image_url,
+            b.data, b.audience, b.status, b.target_count, b.accepted_count,
+            b.delivered_count, b.failed_count, b.scheduled_at, b.cancelled_at,
+            b.created_at, b.completed_at, b.updated_at,
+            COALESCE(u.display_name, u.email) AS requested_by_name
+       FROM push_broadcasts b LEFT JOIN app_users u ON u.id = b.requested_by
+      WHERE b.id = $1`,
     [req.params.broadcastId]
   );
   if (!result.rows[0]) throw new HttpError(404, "Broadcast not found", "NOT_FOUND");
