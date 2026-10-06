@@ -185,14 +185,20 @@ not possible until the app records follows; do not add a fake option.
 
 ## 7. App side (not the API developer's work, listed for completeness)
 
-`src/services/notificationRouting.ts` handles `type: 'news_article'`. Two
-additions for `kind=message` targets:
-- `type: 'screen'` with `screen` in `news | exclusive | journal | subscribe |
-  events | about`, navigating to that tab or stack route.
-- `type: 'url'`, opening the URL in the in-app browser.
-Until a build with this ships, a `message` broadcast that targets a screen or
-URL still arrives and shows; a tap opens the app on the News tab. So the
-console can launch before the app change.
+Done in the app on 2026-10-06 (`src/services/notificationRouting.ts`),
+shipping with the next build. Two `data` shapes for `kind=message` targets:
+- `{ "type": "screen", "screen": "<key>" }`. Keys the dropdown should offer:
+  tabs `news`, `insights`, `exclusive`, `my_sub`, `from_ibsi`; screens
+  `journal`, `subscribe`, `events`, `about`, `podcasts`, `videos`, `webinars`,
+  `blogs`, `analyst_opinions`, `case_studies`, `interviews`, `whitepapers`,
+  `research_reports`, `awards`, `galaxy`, `fintech_lab`, `advisory`,
+  `thought_leadership`, `library`, `account`, `search`. An unknown key opens
+  the app and stops, so a newer console does not break an older build.
+- `{ "type": "url", "url": "https://..." }`, opened by the platform; only
+  http, https and mailto are accepted.
+Until a build with this ships, a `message` broadcast still arrives and
+shows; a tap opens the app on the News tab. So the console can launch before
+the app change reaches phones.
 
 ## 8. Not in scope
 
