@@ -35,6 +35,11 @@ type StatusRow = {
   updated_at: Date;
 };
 
+type AdminStatusRow = StatusRow & {
+  updated_by: string | null;
+  updated_by_name: string | null;
+};
+
 async function readStatus(): Promise<StatusRow> {
   const result = await query<StatusRow>("SELECT * FROM app_status WHERE id = true");
   if (!result.rows[0]) throw new HttpError(500, "app_status row is missing - run migration 035", "APP_STATUS_MISSING");
@@ -101,6 +106,22 @@ appRouter.get(
   })
 );
 
+/** Full editable status configuration for the signed-in admin console. */
+appRouter.get(
+  "/status/config",
+  ...privateRoute,
+  asyncHandler(async (req, res) => {
+    if (!isAdminRole(req.appUser!.role)) throw new HttpError(403, "Admin role required", "FORBIDDEN");
+    const result = await query<AdminStatusRow>(
+      `SELECT s.*, COALESCE(u.display_name, u.email) AS updated_by_name
+         FROM app_status s LEFT JOIN app_users u ON u.id = s.updated_by
+        WHERE s.id = true`
+    );
+    if (!result.rows[0]) throw new HttpError(500, "app_status row is missing - run migration 035", "APP_STATUS_MISSING");
+    res.json({ status: result.rows[0] });
+  })
+);
+
 const statusUpdateSchema = z
   .object({
     min_ios_version: z.string().regex(/^\d+\.\d+\.\d+$/).optional(),
@@ -116,6 +137,57 @@ const statusUpdateSchema = z
     notice_until: z.iso.datetime().nullable().optional()
   })
   .strict();
+
+const updateGateSchema = z.object({
+  min_ios_version: z.string().regex(/^\d+\.\d+\.\d+$/),
+  min_ios_build: z.number().int().nonnegative().nullable(),
+  min_android_version: z.string().regex(/^\d+\.\d+\.\d+$/),
+  min_android_build: z.number().int().nonnegative().nullable()
+});
+
+/** Count installations whose latest app-open event would be blocked. */
+appRouter.post(
+  "/status/impact",
+  ...privateRoute,
+  validate(updateGateSchema),
+  asyncHandler(async (req, res) => {
+    if (!isAdminRole(req.appUser!.role)) throw new HttpError(403, "Admin role required", "FORBIDDEN");
+    const gate = req.body as z.infer<typeof updateGateSchema>;
+    const result = await query<{
+      platform: "ios" | "android";
+      app_version: string | null;
+      build: string | null;
+      installations: string;
+    }>(
+      `WITH latest AS (
+         SELECT DISTINCT ON (installation_id)
+                installation_id, platform, app_version, build
+           FROM app_events
+          WHERE name = 'app_open' AND installation_id IS NOT NULL AND platform IS NOT NULL
+          ORDER BY installation_id, occurred_at DESC
+       )
+       SELECT platform, app_version, build, count(*)::text AS installations
+         FROM latest GROUP BY platform, app_version, build`
+    );
+    const counts = { ios: { known: 0, blocked: 0 }, android: { known: 0, blocked: 0 } };
+    for (const row of result.rows) {
+      const installations = Number(row.installations);
+      counts[row.platform].known += installations;
+      const build = row.build !== null && /^\d+$/.test(row.build) ? Number(row.build) : undefined;
+      if (isBelowMinimum({
+        version: row.app_version ?? undefined,
+        build,
+        minVersion: row.platform === "ios" ? gate.min_ios_version : gate.min_android_version,
+        minBuild: row.platform === "ios" ? gate.min_ios_build : gate.min_android_build
+      })) counts[row.platform].blocked += installations;
+    }
+    res.json({
+      ...counts,
+      known: counts.ios.known + counts.android.known,
+      blocked: counts.ios.blocked + counts.android.blocked
+    });
+  })
+);
 
 /**
  * PUT /v1/app/status - admin only. Partial update: send only the fields to

@@ -6,6 +6,7 @@ const config = window.__FIREBASE_CONFIG__ || {};
 const auth = config.apiKey ? getAuth(initializeApp(config)) : null;
 let token = "";
 let selectedArticle = null;
+let numberRows = [];
 
 async function authorization() {
   if (auth?.currentUser) token = await auth.currentUser.getIdToken();
@@ -26,6 +27,16 @@ async function authApi(path, options = {}) {
   const response = await fetch(`/v1/auth${path}`, { ...options, headers: { Authorization: await authorization() } });
   if (!response.ok) throw new Error("Your IBSi account could not be loaded.");
   return response.json();
+}
+
+async function appApi(path, options = {}) {
+  const response = await fetch(`/v1/app${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: await authorization(), ...(options.headers || {}) }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error?.message || `HTTP ${response.status}`);
+  return payload;
 }
 
 function status(message, error = false) { $("status").textContent = message; $("status").className = error ? "error" : ""; }
@@ -139,6 +150,147 @@ async function loadHistory() {
     history.querySelector(".retry-history")?.addEventListener("click", () => void loadHistory());
   }
 }
+
+function localDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function nullableBuild(id) {
+  const value = $(id).value.trim();
+  return value === "" ? null : Number(value);
+}
+
+function gateBody() {
+  return {
+    min_ios_version: $("min-ios-version").value.trim(),
+    min_ios_build: nullableBuild("min-ios-build"),
+    min_android_version: $("min-android-version").value.trim(),
+    min_android_build: nullableBuild("min-android-build")
+  };
+}
+
+function noticeBody(active = $("notice-active").checked) {
+  return {
+    notice_active: active,
+    notice_level: $("notice-level").value,
+    notice_title: $("notice-title").value.trim() || null,
+    notice_message: $("notice-message").value.trim() || null,
+    notice_link: $("notice-link").value.trim() || null,
+    notice_until: $("notice-until").value ? new Date($("notice-until").value).toISOString() : null
+  };
+}
+
+function updateNoticePreview() {
+  const preview = $("notice-preview");
+  preview.className = `notice-preview ${$("notice-level").value}`;
+  preview.querySelector("strong").textContent = $("notice-title").value.trim() || "Service notice preview";
+  preview.querySelector("p").textContent = $("notice-message").value.trim() || "Your message will appear here.";
+}
+
+async function loadAppStatus(showLoading = true) {
+  if (showLoading) $("app-status-result").textContent = "Loading…";
+  try {
+    const { status: current } = await appApi("/status/config");
+    $("min-ios-version").value = current.min_ios_version;
+    $("min-ios-build").value = current.min_ios_build ?? "";
+    $("min-android-version").value = current.min_android_version;
+    $("min-android-build").value = current.min_android_build ?? "";
+    $("update-message").value = current.update_message;
+    $("notice-active").checked = current.notice_active;
+    $("notice-level").value = current.notice_level;
+    $("notice-title").value = current.notice_title ?? "";
+    $("notice-message").value = current.notice_message ?? "";
+    $("notice-link").value = current.notice_link ?? "";
+    $("notice-until").value = localDateTime(current.notice_until);
+    $("app-status-meta").textContent = `Last changed ${new Date(current.updated_at).toLocaleString()} by ${current.updated_by_name || "system"}.`;
+    if (showLoading) $("app-status-result").textContent = "";
+    updateNoticePreview();
+  } catch (error) {
+    $("app-status-result").textContent = `Status settings could not be loaded: ${error.message}`;
+    $("app-status-result").className = "error";
+  }
+}
+
+async function saveGate(event) {
+  event.preventDefault();
+  if (!event.currentTarget.reportValidity()) return;
+  const gate = gateBody();
+  try {
+    $("app-status-result").textContent = "Calculating affected installations…";
+    const impact = await appApi("/status/impact", { method: "POST", body: JSON.stringify(gate) });
+    const message = impact.known
+      ? `This gate will require an update from ${impact.blocked} of ${impact.known} measured installations (${impact.ios.blocked} iOS, ${impact.android.blocked} Android). Save it?`
+      : "No installation versions have been measured yet. A wrong gate can block readers. Save it anyway?";
+    if (!confirm(message)) { $("app-status-result").textContent = "Update gate was not changed."; return; }
+    await appApi("/status", { method: "PUT", body: JSON.stringify({ ...gate, update_message: $("update-message").value.trim() }) });
+    $("app-status-result").className = "";
+    $("app-status-result").textContent = "Update gate saved.";
+    await loadAppStatus(false);
+  } catch (error) {
+    $("app-status-result").className = "error";
+    $("app-status-result").textContent = error.message;
+  }
+}
+
+async function saveNotice(event) {
+  event?.preventDefault();
+  if (event && !event.currentTarget.reportValidity()) return;
+  if ($("notice-active").checked && !$("notice-message").value.trim()) {
+    $("app-status-result").className = "error";
+    $("app-status-result").textContent = "Enter a notice message before switching it on.";
+    return;
+  }
+  try {
+    await appApi("/status", { method: "PUT", body: JSON.stringify(noticeBody()) });
+    $("app-status-result").className = "";
+    $("app-status-result").textContent = $("notice-active").checked ? "Service notice saved and active." : "Service notice saved and inactive.";
+    await loadAppStatus(false);
+  } catch (error) {
+    $("app-status-result").className = "error";
+    $("app-status-result").textContent = error.message;
+  }
+}
+
+async function switchNoticeOff() {
+  try {
+    await appApi("/status", { method: "PUT", body: JSON.stringify({ notice_active: false }) });
+    $("notice-active").checked = false;
+    $("app-status-result").className = "";
+    $("app-status-result").textContent = "Service notice switched off.";
+    await loadAppStatus(false);
+  } catch (error) {
+    $("app-status-result").className = "error";
+    $("app-status-result").textContent = error.message;
+  }
+}
+
+async function loadNumbers() {
+  const table = $("numbers-table");
+  table.innerHTML = "<p>Loading…</p>";
+  try {
+    const result = await appApi(`/events/summary?days=${$("numbers-days").value}`);
+    numberRows = result.rows;
+    if (!numberRows.length) { table.innerHTML = "<p>No app events have been received for this period yet.</p>"; return; }
+    table.innerHTML = `<table class="data-table"><thead><tr><th>Day</th><th>Event</th><th>Platform</th><th>Events</th><th>Installations</th><th>Readers</th></tr></thead><tbody>${numberRows.map((row) => `<tr><td>${escapeHtml(row.day)}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.platform || "all")}</td><td>${row.events}</td><td>${row.installations}</td><td>${row.users}</td></tr>`).join("")}</tbody></table>`;
+  } catch (error) {
+    table.innerHTML = `<div class="error-state"><p>Numbers could not be loaded: ${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function exportNumbers() {
+  if (!numberRows.length) { alert("There are no rows to export."); return; }
+  const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = [["day", "event", "platform", "events", "installations", "readers"], ...numberRows.map((row) => [row.day, row.name, row.platform, row.events, row.installations, row.users])]
+    .map((row) => row.map(quote).join(",")).join("\r\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  link.download = `ibsi-app-events-${$("numbers-days").value}-days.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
 function escapeHtml(value) { const node = document.createElement("div"); node.textContent = String(value ?? ""); return node.innerHTML; }
 
 function closeHelp(exceptButton) {
@@ -163,14 +315,23 @@ document.addEventListener("keydown", (event) => { if (event.key === "Escape") cl
 
 for (const button of document.querySelectorAll("nav button")) button.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
-  for (const name of ["news", "message", "history"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
+  for (const name of ["news", "message", "history", "app-status", "numbers"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
+  $("preview-panel").hidden = !["news", "message"].includes(button.dataset.tab);
   if (button.dataset.tab === "history") void loadHistory();
+  if (button.dataset.tab === "app-status") void loadAppStatus();
+  if (button.dataset.tab === "numbers") void loadNumbers();
 });
 for (const id of ["title", "body", "image"]) $(id).addEventListener("input", updatePreview);
 $("target-type").addEventListener("change", () => { $("target-value-wrap").hidden = $("target-type").value.startsWith("screen:"); });
 $("audience").addEventListener("change", countAudience);
 $("message-preview").addEventListener("click", async () => { try { status("Sending preview…"); const result = await api("/preview", { method: "POST", body: JSON.stringify(messageBody()) }); status(`Preview accepted on ${result.sent} device(s).`); } catch (error) { status(error.message, true); } });
 $("message-send").addEventListener("click", async () => { try { status("Submitting…"); await confirmedBroadcast(messageBody(), `${$("title").value}\n${$("body").value}`); status($("scheduled-at").value ? "Notification scheduled." : "Notification accepted."); await loadHistory(); } catch (error) { status(error.message, true); } });
+$("update-gate-form").addEventListener("submit", saveGate);
+$("notice-form").addEventListener("submit", saveNotice);
+$("notice-off").addEventListener("click", switchNoticeOff);
+for (const id of ["notice-level", "notice-title", "notice-message"]) $(id).addEventListener("input", updateNoticePreview);
+$("numbers-days").addEventListener("change", loadNumbers);
+$("numbers-export").addEventListener("click", exportNumbers);
 $("google").addEventListener("click", async () => {
   if (!auth) return;
   $("auth-error").textContent = "";
