@@ -187,7 +187,7 @@ notificationConsoleRouter.post(
         title: "IBS Intelligence",
         body: headline,
         sound: "default" as const,
-        ...(image ? { richContent: { image } } : {}),
+        ...(image ? { richContent: { image }, mutableContent: true } : {}),
         data: { type: "news_article", article_id: req.body.article_id, ...(image ? { image_url: image } : {}) }
       };
     } else {

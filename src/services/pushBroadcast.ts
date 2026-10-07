@@ -16,8 +16,8 @@ export type PushAudience =
 
 export type PushData =
   | { type: "news_article"; article_id: string; image_url?: string }
-  | { type: "screen"; screen: "news" | "exclusive" | "journal" | "subscribe" | "events" | "about" }
-  | { type: "url"; url: string };
+  | { type: "screen"; screen: "news" | "exclusive" | "journal" | "subscribe" | "events" | "about"; image_url?: string }
+  | { type: "url"; url: string; image_url?: string };
 
 type TokenRow = { id: string; expo_push_token: string; user_id: string };
 type Ticket = { status: "ok" | "error"; id?: string; details?: { error?: string } };
@@ -40,6 +40,7 @@ export type BroadcastMessage = {
   sound: "default";
   data: PushData;
   richContent?: { image: string };
+  mutableContent?: boolean;
 };
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -113,7 +114,7 @@ export function messageForBroadcast(row: BroadcastRow): BroadcastMessage {
       title: "IBS Intelligence",
       body: row.headline!,
       sound: "default",
-      ...(imageUrl ? { richContent: { image: imageUrl } } : {}),
+      ...(imageUrl ? { richContent: { image: imageUrl }, mutableContent: true } : {}),
       data: {
         type: "news_article",
         article_id: row.article_id!,
@@ -125,8 +126,8 @@ export function messageForBroadcast(row: BroadcastRow): BroadcastMessage {
     title: row.title!,
     body: row.body!,
     sound: "default",
-    ...(row.image_url ? { richContent: { image: row.image_url } } : {}),
-    data: row.data
+    ...(row.image_url ? { richContent: { image: row.image_url }, mutableContent: true } : {}),
+    data: row.image_url ? { ...row.data, image_url: row.image_url } : row.data
   };
 }
 

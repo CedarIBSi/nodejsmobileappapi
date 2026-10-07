@@ -13,6 +13,7 @@ export type PushMessageInput = {
   body: string;
   data?: Record<string, unknown>;
   richContent?: { image: string };
+  mutableContent?: boolean;
   sound?: "default";
 };
 type TokenRow = { id: string; expo_push_token: string };
