@@ -227,17 +227,37 @@ notificationConsoleRouter.get(
   validate(broadcastsQuery, "query"),
   asyncHandler(async (req, res) => {
     const { limit } = req.query as unknown as { limit: number };
-    const result = await query(
+    const result = await query<{ requested_by: string | null; [key: string]: unknown }>(
       `SELECT b.id, b.kind, b.article_id, b.headline, b.title, b.body, b.image_url,
               b.data, b.audience, b.status, b.target_count, b.accepted_count,
               b.delivered_count, b.failed_count, b.scheduled_at, b.cancelled_at,
-              b.created_at, b.completed_at, b.updated_at,
-              COALESCE(u.display_name, u.email) AS requested_by_name
-         FROM push_broadcasts b LEFT JOIN app_users u ON u.id = b.requested_by
+              b.created_at, b.completed_at, b.updated_at, b.requested_by
+         FROM push_broadcasts b
         ORDER BY b.created_at DESC LIMIT $1`,
       [limit]
     );
-    res.json({ broadcasts: result.rows });
+    const requesterIds = [...new Set(result.rows.flatMap((row) => row.requested_by ? [row.requested_by] : []))];
+    let requesterNames = new Map<string, string>();
+    if (requesterIds.length) {
+      try {
+        const users = await query<{ id: string; name: string | null }>(
+          `SELECT id, COALESCE(display_name, email) AS name
+             FROM app_users WHERE id = ANY($1::uuid[])`,
+          [requesterIds]
+        );
+        requesterNames = new Map(users.rows.flatMap((user) => user.name ? [[user.id, user.name]] : []));
+      } catch (error) {
+        // Broadcast history is the audit record. A missing/deleted user or a
+        // transient profile lookup must not prevent administrators seeing it.
+        req.log.warn({ err: error }, "Could not resolve notification requester names");
+      }
+    }
+    res.json({
+      broadcasts: result.rows.map((row) => ({
+        ...row,
+        requested_by_name: row.requested_by ? requesterNames.get(row.requested_by) ?? null : null
+      }))
+    });
   })
 );
 
