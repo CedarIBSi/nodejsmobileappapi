@@ -3,10 +3,11 @@ import { Router } from "express";
 import { transaction } from "../db/pool.js";
 import { asyncHandler } from "../lib/async-handler.js";
 import { HttpError } from "../lib/errors.js";
-import { getGoogleSubscription, verifyPubSubPushToken } from "../services/googlePlay.js";
+import { getGoogleOrder, getGoogleSubscription, verifyPubSubPushToken } from "../services/googlePlay.js";
 import { decodeAppleTransaction, mapAppleStatus, verifyAppleNotification } from "../services/appStore.js";
 import { notifySubscriptionChange, type SubscriptionTransition } from "../lib/purchaseEmail.js";
 import { planIdForStoreProduct, reconcileStoreSubscription } from "../lib/subscriptionReconcile.js";
+import { recordStoreTransaction } from "../lib/storeTransaction.js";
 
 // What a handler's transaction hands back: the outcome for the response, and
 // the row change for the email that may follow it. The email goes after the
@@ -110,6 +111,30 @@ webhookRouter.post("/google-play", asyncHandler(async (req, res) => {
           status: summary.state,
           userId: local.user_id
         });
+        if (summary.latestOrderId) {
+          try {
+            const order = await getGoogleOrder(summary.latestOrderId);
+            await recordStoreTransaction(client, {
+              currency: order.currency,
+              environment,
+              grossAmountMicros: order.grossAmountMicros,
+              proceedsAmountMicros: order.proceedsAmountMicros,
+              productId: summary.productId,
+              provider: "google_play",
+              providerTransactionId: order.orderId,
+              purchasedAt: order.purchasedAt,
+              rawSummary: order.raw,
+              refundAmountMicros: order.refundAmountMicros,
+              storeUpdatedAt: order.storeUpdatedAt,
+              subscriptionId: local.id,
+              taxAmountMicros: order.taxAmountMicros,
+              transactionKind: order.transactionKind,
+              userId: local.user_id
+            });
+          } catch (error) {
+            req.log.warn({ err: error, order_id: summary.latestOrderId }, "Google order accounting lookup failed");
+          }
+        }
         transition = {
           currentEnd: summary.currentEnd,
           environment,
@@ -200,6 +225,34 @@ webhookRouter.post("/apple", asyncHandler(async (req, res) => {
           status: state,
           userId: local.user_id
         });
+        if (decodedTransaction?.transactionId) {
+          const priceMicros = decodedTransaction.price !== undefined
+            ? BigInt(decodedTransaction.price) * 1000n
+            : null;
+          const revoked = Boolean(decodedTransaction.revocationDate);
+          await recordStoreTransaction(client, {
+            currency: decodedTransaction.currency?.toUpperCase() ?? null,
+            environment,
+            grossAmountMicros: priceMicros,
+            proceedsAmountMicros: null,
+            productId: decodedTransaction.productId ?? null,
+            provider: "apple",
+            providerTransactionId: decodedTransaction.transactionId,
+            purchasedAt: decodedTransaction.purchaseDate ? new Date(decodedTransaction.purchaseDate) : null,
+            rawSummary: {
+              currency: decodedTransaction.currency ?? null,
+              price_micros: priceMicros?.toString() ?? null,
+              revoked,
+              transaction_reason: decodedTransaction.transactionReason ?? null
+            },
+            refundAmountMicros: revoked ? priceMicros : null,
+            storeUpdatedAt: decodedTransaction.signedDate ? new Date(decodedTransaction.signedDate) : null,
+            subscriptionId: local.id,
+            taxAmountMicros: null,
+            transactionKind: revoked ? "refund" : "charge",
+            userId: local.user_id
+          });
+        }
         transition = {
           currentEnd,
           environment,

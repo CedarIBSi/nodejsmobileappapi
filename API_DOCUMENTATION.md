@@ -372,6 +372,8 @@ iOS body:
 
 The API never trusts a client-supplied status. It fetches the canonical purchase state from Google or Apple, upserts the subscription, and writes one `entitlements` row per type the plan's product grants (`insights`, `journal_india`, `journal_global`), closing any type the product does not include. `active`, `trialing`, and `in_grace_period` grant access. Webhooks and the lapsed-subscription refresh re-resolve the plan from the product id the store reports, so a plan change made in the store's own UI is reconciled too.
 
+After migration `036_subscription_transaction_ledger.sql`, verified Apple transactions and Google Play orders are also recorded idempotently in `subscription_transactions`. Customer totals come from the signed Apple transaction or Google Orders API, never `subscription_plans.price_amount`. Google order accounting runs after the purchase response and all accounting failures are non-blocking, so reporting cannot delay or deny access. Store webhooks retry the same capture for renewals and refunds. Amounts are stored as integer millionths of a currency unit; sandbox and production are always reported separately.
+
 **Subscription emails** (`src/lib/purchaseEmail.ts`). After the response here, and after each store webhook and lapsed-subscription refresh commits, the API compares the subscription row's plan and status before and after the reconcile and emails the reader in IBSi's own branding at four moments, each once however often the same state is reported: a plan recorded for the first time ("Welcome": what it includes, renewal interval and period end, that the store holds the receipt, how to manage or cancel in that store), a move to another of our plans, a cancellation while the paid period still runs (Google reports this state; Apple does not, so Apple readers get only the next one), and an expiry or refund ("has ended", not sent after a cancellation mail). Renewals and repeat verifications send nothing. Every message names `SUPPORT_EMAIL`; sandbox purchases get a `[Test]` subject and a no-money-taken note. Same SMTP as Express interest; a failure is logged with the subscription id and never affects the purchase or the webhook. Nothing is sent when SMTP is unconfigured or the account has no email.
 
 #### `GET /v1/entitlements/me` — Private
@@ -785,6 +787,7 @@ Principal tables:
 - `app_users`: Firebase-to-application profile mapping and role
 - `subscription_plans`: product_code, interval, Apple and Google product IDs, reference price
 - `subscriptions`: provider purchase state and billing periods
+- `subscription_transactions`: store-confirmed customer totals, refunds and available proceeds per transaction/order
 - `entitlements`: normalized premium access grants
 - `store_events`: idempotent Google/Apple webhook records
 - `news_article_access`: anonymous/account monthly meter
@@ -795,7 +798,7 @@ Principal tables:
 - `db_white_paper_data`: white-paper metadata and private PDF filename
 - `galaxy_page_content`, journal-about, awards, and house-ad tables: seeded content
 
-All current migrations `001` through `011` must be present in `schema_migrations`.
+Every migration present in `migrations/` must also be present in `schema_migrations`; production migrations are applied manually before dependent API code is deployed.
 
 ## 10. Security behavior
 

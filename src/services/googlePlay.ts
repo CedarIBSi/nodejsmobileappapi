@@ -42,6 +42,7 @@ export type GoogleSubscriptionSummary = {
   // uses for real purchases - `testPurchase` is how the response marks them,
   // there is no separate sandbox API the way Apple has one.
   isTestPurchase: boolean;
+  latestOrderId: string | null;
   productId: string | null;
   purchaseToken: string;
   state: GoogleSubscriptionState;
@@ -121,8 +122,56 @@ export async function getGoogleSubscription(purchaseToken: string): Promise<Goog
     currentEnd: lineItem?.expiryTime ? new Date(lineItem.expiryTime) : null,
     currentStart: data.startTime ? new Date(data.startTime) : null,
     isTestPurchase: Boolean(data.testPurchase),
+    latestOrderId: lineItem?.latestSuccessfulOrderId ?? null,
     productId: lineItem?.productId ?? null,
     purchaseToken,
     state: normalizeState(data.subscriptionState)
+  };
+}
+
+export type GoogleOrderSummary = {
+  currency: string | null;
+  grossAmountMicros: bigint | null;
+  orderId: string;
+  proceedsAmountMicros: bigint | null;
+  purchasedAt: Date | null;
+  raw: unknown;
+  refundAmountMicros: bigint | null;
+  storeUpdatedAt: Date | null;
+  taxAmountMicros: bigint | null;
+  transactionKind: "charge" | "refund";
+};
+
+function moneyMicros(money: androidpublisher_v3.Schema$Money | null | undefined): bigint | null {
+  if (!money || (money.units == null && money.nanos == null)) return null;
+  return BigInt(money.units ?? "0") * 1_000_000n + BigInt(Math.round((money.nanos ?? 0) / 1000));
+}
+
+/** Fetches the exact buyer total and Play proceeds for one successful order. */
+export async function getGoogleOrder(orderId: string): Promise<GoogleOrderSummary> {
+  const env = config();
+  if (!env.GOOGLE_PLAY_PACKAGE_NAME) {
+    throw new HttpError(503, "Google Play package name is not configured", "GOOGLE_PLAY_NOT_CONFIGURED");
+  }
+  const response = await androidPublisher().orders.get({ packageName: env.GOOGLE_PLAY_PACKAGE_NAME, orderId });
+  const data = response.data;
+  const gross = moneyMicros(data.total);
+  const fullRefund = moneyMicros(data.orderHistory?.refundEvent?.refundDetails?.total);
+  const partialRefund = (data.orderHistory?.partialRefundEvents ?? []).reduce(
+    (total, event) => total + (moneyMicros(event.refundDetails?.total) ?? 0n),
+    0n
+  );
+  const refundAmount = fullRefund ?? (partialRefund > 0n ? partialRefund : null);
+  return {
+    currency: data.total?.currencyCode?.toUpperCase() ?? null,
+    grossAmountMicros: gross !== null && gross >= 0n ? gross : null,
+    orderId: data.orderId ?? orderId,
+    proceedsAmountMicros: moneyMicros(data.developerRevenueInBuyerCurrency),
+    purchasedAt: data.createTime ? new Date(data.createTime) : null,
+    raw: data,
+    refundAmountMicros: refundAmount,
+    storeUpdatedAt: data.lastEventTime ? new Date(data.lastEventTime) : null,
+    taxAmountMicros: moneyMicros(data.tax),
+    transactionKind: refundAmount !== null ? "refund" : "charge"
   };
 }

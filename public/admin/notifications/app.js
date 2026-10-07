@@ -313,7 +313,7 @@ function breakdownRows(rows, label, value = "subscriptions") {
 }
 
 async function loadSubscriberOverview() {
-  const overview = await adminApi("/subscribers/overview");
+  const [overview, finance] = await Promise.all([adminApi("/subscribers/overview"), adminApi("/subscribers/finance")]);
   const metrics = [overview.total, overview.current_access, overview.windows.renewing_30 || 0, overview.windows.expiring_30 || 0];
   document.querySelectorAll("#subscriber-kpis .metric-card strong").forEach((node, index) => { node.textContent = metrics[index].toLocaleString(); });
   $("subscriber-products").innerHTML = breakdownRows(overview.products, (row) => `${productNames[row.product_code] || row.product_code} · ${row.interval}`);
@@ -321,11 +321,18 @@ async function loadSubscriberOverview() {
   $("subscriber-stores").innerHTML = breakdownRows(overview.stores, (row) => storeNames[row.provider] || row.provider);
   const movement = Object.entries(overview.movement).map(([name, events]) => ({ name, events }));
   $("subscriber-movement").innerHTML = breakdownRows(movement, (row) => row.name.charAt(0).toUpperCase() + row.name.slice(1), "events");
+  $("subscriber-finance").innerHTML = finance.rows.length
+    ? `<div class="breakdown-list">${finance.rows.map((row) => `<div><span>${escapeHtml(storeNames[row.provider] || row.provider)} · ${escapeHtml(row.environment)} · ${escapeHtml(row.currency)}</span><strong>${formatMicros(Number(row.gross_micros) - Number(row.refund_micros), row.currency)}</strong><small>${row.transactions} transaction(s)${Number(row.proceeds_micros) ? ` · proceeds ${formatMicros(row.proceeds_micros, row.currency)}` : ""}</small></div>`).join("")}</div>`
+    : "<p class=\"muted\">No store-confirmed transactions recorded yet.</p>";
 }
 
 function subscriptionDate(value) { return value ? new Date(value).toLocaleDateString() : "—"; }
+function formatMicros(value, currency) {
+  if (value == null || !currency) return "—";
+  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(Number(value) / 1000000);
+}
 function subscriptionRowsTable(rows) {
-  return `<table class="data-table subscriber-table"><thead><tr><th>Reader</th><th>Product</th><th>Store</th><th>Status</th><th>Started</th><th>Renews / ends</th><th>Last store event</th></tr></thead><tbody>${rows.map((row) => `<tr tabindex="0" data-subscription-id="${row.id}"><td><strong>${escapeHtml(row.email || "No email")}</strong><small>${escapeHtml(row.display_name || "")}</small></td><td>${escapeHtml(productNames[row.product_code] || row.product_code)}<small>${escapeHtml(row.interval)}</small></td><td>${escapeHtml(storeNames[row.provider] || row.provider)}<small>${escapeHtml(row.environment || "")}</small></td><td><span class="status-pill status-${escapeHtml(row.status)}">${escapeHtml(row.status_label)}</span><small>${escapeHtml(row.status)}</small></td><td>${subscriptionDate(row.current_start || row.created_at)}</td><td>${subscriptionDate(row.current_end)}</td><td>${escapeHtml(row.last_event_type || "—")}<small>${subscriptionDate(row.last_event_at)}</small></td></tr>`).join("")}</tbody></table>`;
+  return `<table class="data-table subscriber-table"><thead><tr><th>Reader</th><th>Product</th><th>Store</th><th>Status</th><th>Paid</th><th>Started</th><th>Renews / ends</th><th>Last store event</th></tr></thead><tbody>${rows.map((row) => `<tr tabindex="0" data-subscription-id="${row.id}"><td><strong>${escapeHtml(row.email || "No email")}</strong><small>${escapeHtml(row.display_name || "")}</small></td><td>${escapeHtml(productNames[row.product_code] || row.product_code)}<small>${escapeHtml(row.interval)}</small></td><td>${escapeHtml(storeNames[row.provider] || row.provider)}<small>${escapeHtml(row.environment || "")}</small></td><td><span class="status-pill status-${escapeHtml(row.status)}">${escapeHtml(row.status_label)}</span><small>${escapeHtml(row.status)}</small></td><td>${formatMicros(row.paid_micros, row.paid_currency)}<small>${row.transaction_count || 0} transaction(s)</small></td><td>${subscriptionDate(row.current_start || row.created_at)}</td><td>${subscriptionDate(row.current_end)}</td><td>${escapeHtml(row.last_event_type || "—")}<small>${subscriptionDate(row.last_event_at)}</small></td></tr>`).join("")}</tbody></table>`;
 }
 
 async function loadSubscribers(reset = false) {
@@ -359,10 +366,14 @@ function eventLabel(provider, type) {
 async function openSubscriberHistory(id) {
   const dialog = $("subscriber-dialog");
   $("subscriber-events").innerHTML = "<p>Loading…</p>";
+  $("subscriber-payments").innerHTML = "<p>Loading payments…</p>";
   dialog.showModal();
   try {
     const result = await adminApi(`/subscribers/${id}/events`);
     $("subscriber-dialog-title").textContent = result.subscription.email || "Subscriber history";
+    $("subscriber-payments").innerHTML = result.transactions.length
+      ? `<h3>Payment history</h3><div class="event-timeline">${result.transactions.map((payment) => `<div><span></span><section><strong>${escapeHtml(payment.transaction_kind === "refund" ? "Refund" : "Payment")} · ${formatMicros(Number(payment.gross_amount_micros || 0) - Number(payment.refund_amount_micros || 0), payment.currency)}</strong><small>${escapeHtml(payment.provider_transaction_id)} · ${subscriptionDate(payment.purchased_at)} · ${escapeHtml(payment.environment)}</small>${payment.proceeds_amount_micros != null ? `<p>Store proceeds: ${formatMicros(payment.proceeds_amount_micros, payment.currency)}</p>` : ""}</section></div>`).join("")}</div>`
+      : "<h3>Payment history</h3><p>No store-confirmed payments recorded yet.</p>";
     $("subscriber-events").innerHTML = result.events.length
       ? `<div class="event-timeline">${result.events.map((event) => `<div><span></span><section><strong>${escapeHtml(eventLabel(result.subscription.provider, event.event_type))}</strong><small>${escapeHtml(event.event_type)} · ${new Date(event.created_at).toLocaleString()}</small><p>${event.processed_at ? "Processed" : "Recorded, awaiting processing"}</p></section></div>`).join("")}</div>`
       : "<p>No store webhook events are recorded for this subscription.</p>";
@@ -386,7 +397,7 @@ async function exportSubscribers() {
     }
     if (!all.length) return alert("There are no subscribers to export.");
     const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-    const rows = [["email","name","product","interval","store","environment","status","store_status","started","renews_or_ends","last_store_event","last_event_at"], ...all.map((row) => [row.email,row.display_name,productNames[row.product_code] || row.product_code,row.interval,storeNames[row.provider] || row.provider,row.environment,row.status_label,row.status,row.current_start || row.created_at,row.current_end,row.last_event_type,row.last_event_at])];
+    const rows = [["email","name","product","interval","store","environment","status","store_status","amount_paid","currency","transactions","started","renews_or_ends","last_store_event","last_event_at"], ...all.map((row) => [row.email,row.display_name,productNames[row.product_code] || row.product_code,row.interval,storeNames[row.provider] || row.provider,row.environment,row.status_label,row.status,row.paid_micros == null ? "" : Number(row.paid_micros) / 1000000,row.paid_currency,row.transaction_count,row.current_start || row.created_at,row.current_end,row.last_event_type,row.last_event_at])];
     const csv = rows.map((row) => row.map(quote).join(",")).join("\r\n");
     const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = "ibsi-subscribers.csv"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   } catch (error) { alert(`Export failed: ${error.message}`); }

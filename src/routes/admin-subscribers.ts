@@ -104,6 +104,31 @@ adminSubscriberRouter.get(
 );
 
 adminSubscriberRouter.get(
+  "/finance",
+  ...secured,
+  asyncHandler(async (_req, res) => {
+    const result = await query<{
+      currency: string; environment: string; gross_micros: string; proceeds_micros: string;
+      provider: string; refund_micros: string; transactions: string;
+    }>(
+      `SELECT provider, environment, currency,
+              count(*)::text AS transactions,
+              COALESCE(sum(gross_amount_micros), 0)::text AS gross_micros,
+              COALESCE(sum(refund_amount_micros), 0)::text AS refund_micros,
+              COALESCE(sum(proceeds_amount_micros), 0)::text AS proceeds_micros
+         FROM subscription_transactions
+        WHERE currency IS NOT NULL
+        GROUP BY provider, environment, currency
+        ORDER BY environment, currency, provider`
+    );
+    res.json({
+      rows: result.rows,
+      note: "Customer totals are store-confirmed. Proceeds are shown only where the store supplies them; Apple proceeds require a financial-report import."
+    });
+  })
+);
+
+adminSubscriberRouter.get(
   "/",
   ...secured,
   validate(listQuery, "query"),
@@ -118,11 +143,13 @@ adminSubscriberRouter.get(
       interval: string; provider: string; environment: string | null; status: string; current_start: Date | null;
       current_end: Date | null; cancelled_at: Date | null; created_at: Date; updated_at: Date;
       last_event_type: string | null; last_event_at: Date | null; total_count: string;
+      paid_currency: string | null; paid_micros: string | null; transaction_count: string;
     }>(
       `SELECT s.id, u.email, u.display_name, p.product_code, p.name AS plan_name, p."interval" AS "interval",
               s.provider, s.environment, s.status, s.current_start, s.current_end, s.cancelled_at,
               s.created_at, s.updated_at, event.event_type AS last_event_type,
-              event.created_at AS last_event_at, count(*) OVER()::text AS total_count
+              event.created_at AS last_event_at, money.paid_currency, money.paid_micros,
+              money.transaction_count, count(*) OVER()::text AS total_count
          FROM subscriptions s
          JOIN app_users u ON u.id = s.user_id
          JOIN subscription_plans p ON p.id = s.local_plan_id
@@ -131,6 +158,12 @@ adminSubscriberRouter.get(
             WHERE provider = s.provider AND provider_subscription_id = s.provider_subscription_id
             ORDER BY created_at DESC LIMIT 1
          ) event ON true
+         LEFT JOIN LATERAL (
+           SELECT CASE WHEN count(DISTINCT currency) = 1 THEN min(currency) ELSE NULL END AS paid_currency,
+                  (sum(COALESCE(gross_amount_micros, 0)) - sum(COALESCE(refund_amount_micros, 0)))::text AS paid_micros,
+                  count(*)::text AS transaction_count
+             FROM subscription_transactions WHERE subscription_id = s.id
+         ) money ON true
          ${where}
         ORDER BY s.updated_at DESC LIMIT ${limitParam} OFFSET ${offsetParam}`,
       values
@@ -162,6 +195,17 @@ adminSubscriberRouter.get(
           [row.provider, row.provider_subscription_id]
         )
       : { rows: [] };
-    res.json({ subscription: row, events: events.rows });
+    const transactions = await query<{
+      id: string; provider_transaction_id: string; transaction_kind: string; currency: string | null;
+      gross_amount_micros: string | null; refund_amount_micros: string | null;
+      proceeds_amount_micros: string | null; purchased_at: Date | null; environment: string;
+    }>(
+      `SELECT id, provider_transaction_id, transaction_kind, currency, gross_amount_micros::text,
+              refund_amount_micros::text, proceeds_amount_micros::text, purchased_at, environment
+         FROM subscription_transactions WHERE subscription_id = $1
+        ORDER BY purchased_at DESC NULLS LAST, created_at DESC LIMIT 100`,
+      [row.id]
+    );
+    res.json({ subscription: row, events: events.rows, transactions: transactions.rows });
   })
 );

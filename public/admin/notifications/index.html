@@ -81,6 +81,7 @@
               <section class="card breakdown-card"><h3>Status</h3><div id="subscriber-statuses"><p>Loading…</p></div></section>
               <section class="card breakdown-card"><h3>Stores</h3><div id="subscriber-stores"><p>Loading…</p></div></section>
               <section class="card breakdown-card"><h3>Last 30 days</h3><div id="subscriber-movement"><p>Loading…</p></div></section>
+              <section class="card breakdown-card"><h3>Store-confirmed money</h3><div id="subscriber-finance"><p>Loading…</p></div><p class="muted">Production and sandbox are kept separate. Apple proceeds require financial-report import.</p></section>
             </div>
             <section class="card subscriber-list-card">
               <div class="subscriber-list-tools"><div><h3>Subscriber list</h3><p class="muted">Select a row to see its store-event history.</p></div><label class="search-box" for="subscriber-search"><span>Search email</span><input id="subscriber-search" type="search" placeholder="name@example.com"></label><button id="subscriber-export" type="button" class="secondary">Export CSV</button></div>
@@ -103,7 +104,7 @@
     </div>
     <button id="sidebar-scrim" class="sidebar-scrim" aria-label="Close navigation"></button>
   </section>
-  <dialog id="subscriber-dialog" class="subscriber-dialog"><div class="dialog-heading"><div><p class="eyebrow">Store lifecycle</p><h2 id="subscriber-dialog-title">Subscriber history</h2></div><button id="subscriber-dialog-close" type="button" class="icon-button" aria-label="Close">×</button></div><div id="subscriber-events"><p>Loading…</p></div></dialog>
+  <dialog id="subscriber-dialog" class="subscriber-dialog"><div class="dialog-heading"><div><p class="eyebrow">Payments &amp; store lifecycle</p><h2 id="subscriber-dialog-title">Subscriber history</h2></div><button id="subscriber-dialog-close" type="button" class="icon-button" aria-label="Close">×</button></div><div id="subscriber-payments"><p>Loading…</p></div><div id="subscriber-events"><p>Loading…</p></div></dialog>
   <script src="/admin/firebase-config.js"></script>
   <script type="module" src="/admin/notifications/app.js"></script>
 </body>

@@ -78,11 +78,16 @@ export type AppleSubscriptionState =
   | "unknown";
 
 export type AppleSubscriptionSummary = {
+  currency: string | null;
   currentEnd: Date | null;
   environment: "sandbox" | "production";
   originalTransactionId: string;
+  priceMicros: bigint | null;
   productId: string | null;
+  purchaseDate: Date | null;
+  revoked: boolean;
   state: AppleSubscriptionState;
+  transactionId: string;
 };
 
 const stateByStatus: Partial<Record<Status, AppleSubscriptionState>> = {
@@ -133,11 +138,17 @@ export async function getAppleSubscription(transactionId: string): Promise<Apple
   }
 
   return {
+    currency: match.transaction.currency?.toUpperCase() ?? null,
     currentEnd: match.transaction.expiresDate ? new Date(match.transaction.expiresDate) : null,
     environment: match.transaction.environment === Environment.PRODUCTION ? "production" : "sandbox",
     originalTransactionId: match.transaction.originalTransactionId ?? transactionId,
+    // Apple reports milliunits; the ledger stores millionths.
+    priceMicros: match.transaction.price !== undefined ? BigInt(match.transaction.price) * 1000n : null,
     productId: match.transaction.productId ?? null,
-    state: mapAppleStatus(match.item.status)
+    purchaseDate: match.transaction.purchaseDate ? new Date(match.transaction.purchaseDate) : null,
+    revoked: Boolean(match.transaction.revocationDate),
+    state: mapAppleStatus(match.item.status),
+    transactionId: match.transaction.transactionId ?? transactionId
   };
 }
 

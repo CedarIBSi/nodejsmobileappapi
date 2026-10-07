@@ -6,12 +6,13 @@ import { HttpError } from "../lib/errors.js";
 import { isStaffRole } from "../lib/entitlement.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { getGoogleSubscription } from "../services/googlePlay.js";
+import { getGoogleOrder, getGoogleSubscription } from "../services/googlePlay.js";
 import { getAppleSubscription } from "../services/appStore.js";
 import { isProductCode, type ProductCode, products } from "../lib/catalogue.js";
 import { notifySubscriptionChange } from "../lib/purchaseEmail.js";
 import { reconcileStoreSubscription, type StoreProvider } from "../lib/subscriptionReconcile.js";
 import { refreshLapsedSubscription } from "../lib/subscriptionRefresh.js";
+import { recordStoreTransaction, type StoreTransactionInput } from "../lib/storeTransaction.js";
 
 export const subscriptionRouter = Router();
 const verifyPurchaseSchema = z.discriminatedUnion("platform", [
@@ -145,6 +146,9 @@ subscriptionRouter.post(
     let currentStart: Date | null;
     let currentEnd: Date | null;
     let environment: "sandbox" | "production";
+    let ledgerEntry: Omit<StoreTransactionInput, "subscriptionId" | "userId"> | null = null;
+    let googleOrderId: string | null = null;
+    let googleProductId: string | null = null;
 
     if (body.platform === "android") {
       if (plan.google_product_id !== body.product_id) {
@@ -160,6 +164,10 @@ subscriptionRouter.post(
       currentStart = summary.currentStart;
       currentEnd = summary.currentEnd;
       environment = summary.isTestPurchase ? "sandbox" : "production";
+      // The order lookup is intentionally deferred until after the response;
+      // it adds no latency to the app's purchase confirmation.
+      googleOrderId = summary.latestOrderId;
+      googleProductId = summary.productId;
     } else {
       if (plan.apple_product_id !== body.product_id) {
         throw new HttpError(400, "Product does not match the selected plan", "PRODUCT_MISMATCH");
@@ -174,6 +182,26 @@ subscriptionRouter.post(
       currentStart = null;
       currentEnd = summary.currentEnd;
       environment = summary.environment;
+      ledgerEntry = {
+        currency: summary.currency,
+        environment,
+        grossAmountMicros: summary.priceMicros,
+        proceedsAmountMicros: null,
+        productId: summary.productId,
+        provider,
+        providerTransactionId: summary.transactionId,
+        purchasedAt: summary.purchaseDate,
+        rawSummary: {
+          currency: summary.currency,
+          price_micros: summary.priceMicros?.toString() ?? null,
+          revoked: summary.revoked,
+          state: summary.state
+        },
+        refundAmountMicros: summary.revoked ? summary.priceMicros : null,
+        storeUpdatedAt: null,
+        taxAmountMicros: null,
+        transactionKind: summary.revoked ? "refund" : "charge"
+      };
     }
 
     // What we knew of this subscription before the reconcile, so the email
@@ -188,8 +216,8 @@ subscriptionRouter.post(
     );
     const previous = before.rows[0] ?? null;
 
-    const subscriptionId = await transaction((client) =>
-      reconcileStoreSubscription(client, {
+    const subscriptionId = await transaction(async (client) => {
+      const id = await reconcileStoreSubscription(client, {
         cancelledAt: status === "revoked" || status === "canceled" ? new Date() : null,
         currentEnd,
         currentStart,
@@ -199,8 +227,16 @@ subscriptionRouter.post(
         providerSubscriptionId,
         status,
         userId: req.appUser!.id
-      })
-    );
+      });
+      if (ledgerEntry) {
+        await recordStoreTransaction(client, {
+          ...ledgerEntry,
+          subscriptionId: id,
+          userId: req.appUser!.id
+        });
+      }
+      return id;
+    });
 
     const result = await query(
       `SELECT ${statusColumns},
@@ -213,6 +249,36 @@ subscriptionRouter.post(
       [subscriptionId]
     );
     res.status(201).json({ subscription: result.rows[0] });
+
+    if (provider === "google_play" && googleOrderId) {
+      const orderId = googleOrderId;
+      const productId = googleProductId;
+      void (async () => {
+        try {
+          const order = await getGoogleOrder(orderId);
+          await transaction((client) => recordStoreTransaction(client, {
+            currency: order.currency,
+            environment,
+            grossAmountMicros: order.grossAmountMicros,
+            proceedsAmountMicros: order.proceedsAmountMicros,
+            productId,
+            provider: "google_play",
+            providerTransactionId: order.orderId,
+            purchasedAt: order.purchasedAt,
+            rawSummary: order.raw,
+            refundAmountMicros: order.refundAmountMicros,
+            storeUpdatedAt: order.storeUpdatedAt,
+            subscriptionId,
+            taxAmountMicros: order.taxAmountMicros,
+            transactionKind: order.transactionKind,
+            userId: req.appUser!.id
+          }));
+        } catch (error) {
+          // Access was already granted and the client already answered.
+          req.log.warn({ err: error, order_id: orderId }, "Google order accounting lookup failed");
+        }
+      })();
+    }
 
     // After the response: the reader is already subscribed, and the mail can
     // take a few seconds on a slow relay that the purchase screen should not
