@@ -18,17 +18,16 @@ button { transition: background .16s ease, color .16s ease, transform .16s ease;
 button:active { transform: translateY(1px); }
 
 .auth-screen { min-height: 100vh; display: grid; place-content: center; gap: 28px; padding: 28px; background: radial-gradient(circle at 10% 10%, #dcebF5 0, transparent 36%), linear-gradient(140deg, #f8fbfd, #edf3f7); }
-.auth-brand { display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--navy); font-size: 23px; }
-.brand-orbit { display: grid; place-items: center; width: 38px; height: 38px; border: 3px solid #1597c5; border-radius: 50%; color: var(--gold); font-weight: 900; font-style: italic; box-shadow: inset 0 0 0 3px #fff; }
+.auth-brand { display: flex; align-items: center; justify-content: center; }
+.auth-brand .official-logo { width: min(240px, 62vw); height: auto; object-fit: contain; }
 .auth-card { width: min(460px, calc(100vw - 40px)); padding: 34px; text-align: left; }
 .auth-card h1 { margin: 5px 0 10px; font-size: 30px; color: var(--navy); }
 
 .admin-shell { min-height: 100vh; }
 .sidebar { position: fixed; inset: 0 auto 0 0; z-index: 30; display: flex; flex-direction: column; width: 268px; padding: 24px 16px 16px; background: linear-gradient(180deg, var(--navy), #061a2c); color: #fff; box-shadow: 10px 0 35px #0a263b17; }
-.brand { display: flex; align-items: center; gap: 11px; min-height: 54px; padding: 0 10px 22px; border-bottom: 1px solid #ffffff18; font-size: 20px; }
-.brand .brand-orbit { width: 34px; height: 34px; flex: 0 0 auto; border-width: 2px; box-shadow: none; }
-.brand-name { display: grid; line-height: 1.05; }
-.brand-name small { margin-top: 6px; color: #8eb1c8; font-size: 9px; font-weight: 800; letter-spacing: .18em; }
+.brand { display: grid; gap: 8px; min-height: 54px; padding: 10px 12px 20px; border-bottom: 1px solid #ffffff18; }
+.brand .official-logo { width: 174px; max-height: 54px; padding: 7px 10px; border-radius: 8px; background: #fff; object-fit: contain; }
+.brand-console-label { color: #8eb1c8; font-size: 9px; font-weight: 800; letter-spacing: .18em; }
 .side-nav { display: grid; gap: 10px; margin-top: 24px; }
 .nav-group { border-radius: 10px; }
 .nav-section { display: grid; grid-template-columns: 25px 1fr auto; align-items: center; width: 100%; padding: 12px 13px; border: 0; border-radius: 9px; background: transparent; color: #b8cbd8; text-align: left; font-weight: 750; }
