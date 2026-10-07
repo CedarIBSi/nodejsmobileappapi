@@ -129,6 +129,26 @@ async function loadHistory() {
 }
 function escapeHtml(value) { const node = document.createElement("div"); node.textContent = String(value ?? ""); return node.innerHTML; }
 
+function closeHelp(exceptButton) {
+  for (const button of document.querySelectorAll(".help-button")) {
+    if (button === exceptButton) continue;
+    button.setAttribute("aria-expanded", "false");
+    const popover = $(button.getAttribute("aria-controls"));
+    if (popover) popover.hidden = true;
+  }
+}
+for (const button of document.querySelectorAll(".help-button")) button.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  const popover = $(button.getAttribute("aria-controls"));
+  const opening = button.getAttribute("aria-expanded") !== "true";
+  closeHelp(opening ? button : null);
+  button.setAttribute("aria-expanded", String(opening));
+  if (popover) popover.hidden = !opening;
+});
+document.addEventListener("click", () => closeHelp());
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeHelp(); });
+
 for (const button of document.querySelectorAll("nav button")) button.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
   for (const name of ["news", "message", "history"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
