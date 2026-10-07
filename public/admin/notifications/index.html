@@ -31,6 +31,10 @@
             <button type="button" data-tab="history">History</button>
           </div>
         </div>
+        <div class="nav-group" data-section="subscribers">
+          <button type="button" class="nav-section" data-section-button="subscribers"><span class="nav-icon">◎</span><span>Subscribers</span><span class="chevron">⌄</span></button>
+          <div class="subnav"><button type="button" data-tab="subscribers">Overview & list</button></div>
+        </div>
         <div class="nav-group" data-section="app-management">
           <button type="button" class="nav-section" data-section-button="app-management"><span class="nav-icon">◫</span><span>App management</span><span class="chevron">⌄</span></button>
           <div class="subnav">
@@ -69,6 +73,22 @@
           </section>
           <section class="card panel wide-panel" id="history-panel" hidden><h2>Notification history</h2><p class="muted">Delivery and scheduling records for audience broadcasts.</p><div id="history" class="list"><p>Loading…</p></div></section>
 
+          <section class="panel wide-panel subscriber-workspace" id="subscribers-panel" hidden>
+            <div class="subscriber-heading"><div><h2>Subscribers</h2><p class="muted">Operational access and store lifecycle data. Revenue and payouts remain in Play Console and App Store Connect.</p></div><button id="subscribers-refresh" type="button" class="secondary">Refresh</button></div>
+            <div id="subscriber-kpis" class="kpi-grid"><div class="card metric-card"><span>Subscription records</span><strong>—</strong></div><div class="card metric-card"><span>Current access</span><strong>—</strong></div><div class="card metric-card"><span>Renewing in 30 days</span><strong>—</strong></div><div class="card metric-card"><span>Expiring in 30 days</span><strong>—</strong></div></div>
+            <div class="subscriber-breakdowns">
+              <section class="card breakdown-card"><h3>Products & intervals</h3><div id="subscriber-products"><p>Loading…</p></div></section>
+              <section class="card breakdown-card"><h3>Status</h3><div id="subscriber-statuses"><p>Loading…</p></div></section>
+              <section class="card breakdown-card"><h3>Stores</h3><div id="subscriber-stores"><p>Loading…</p></div></section>
+              <section class="card breakdown-card"><h3>Last 30 days</h3><div id="subscriber-movement"><p>Loading…</p></div></section>
+            </div>
+            <section class="card subscriber-list-card">
+              <div class="subscriber-list-tools"><div><h3>Subscriber list</h3><p class="muted">Select a row to see its store-event history.</p></div><label class="search-box" for="subscriber-search"><span>Search email</span><input id="subscriber-search" type="search" placeholder="name@example.com"></label><button id="subscriber-export" type="button" class="secondary">Export CSV</button></div>
+              <div id="subscriber-list" class="table-wrap"><p>Loading…</p></div>
+              <div class="pager"><button id="subscriber-prev" type="button" class="secondary" disabled>Previous</button><span id="subscriber-page">0 records</span><button id="subscriber-next" type="button" class="secondary" disabled>Next</button></div>
+            </section>
+          </section>
+
           <section class="card panel wide-panel" id="app-status-panel" hidden>
             <div class="panel-heading"><div><h2>Status & notices</h2><p id="app-status-meta" class="muted">Loading current settings…</p></div></div>
             <div class="admin-grid">
@@ -83,6 +103,7 @@
     </div>
     <button id="sidebar-scrim" class="sidebar-scrim" aria-label="Close navigation"></button>
   </section>
+  <dialog id="subscriber-dialog" class="subscriber-dialog"><div class="dialog-heading"><div><p class="eyebrow">Store lifecycle</p><h2 id="subscriber-dialog-title">Subscriber history</h2></div><button id="subscriber-dialog-close" type="button" class="icon-button" aria-label="Close">×</button></div><div id="subscriber-events"><p>Loading…</p></div></dialog>
   <script src="/admin/firebase-config.js"></script>
   <script type="module" src="/admin/notifications/app.js"></script>
 </body>

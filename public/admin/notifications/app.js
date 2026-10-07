@@ -7,6 +7,9 @@ const auth = config.apiKey ? getAuth(initializeApp(config)) : null;
 let token = "";
 let selectedArticle = null;
 let numberRows = [];
+let subscriberRows = [];
+let subscriberOffset = 0;
+const subscriberPageSize = 50;
 
 async function authorization() {
   if (auth?.currentUser) token = await auth.currentUser.getIdToken();
@@ -31,6 +34,16 @@ async function authApi(path, options = {}) {
 
 async function appApi(path, options = {}) {
   const response = await fetch(`/v1/app${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: await authorization(), ...(options.headers || {}) }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error?.message || `HTTP ${response.status}`);
+  return payload;
+}
+
+async function adminApi(path, options = {}) {
+  const response = await fetch(`/v1/admin${path}`, {
     ...options,
     headers: { "Content-Type": "application/json", Authorization: await authorization(), ...(options.headers || {}) }
   });
@@ -291,6 +304,93 @@ function exportNumbers() {
   link.click();
   URL.revokeObjectURL(link.href);
 }
+
+const productNames = { journal_india: "India", journal_global: "Global", journal_all: "India + Global" };
+const storeNames = { google_play: "Google Play", apple: "App Store" };
+function breakdownRows(rows, label, value = "subscriptions") {
+  if (!rows.length) return "<p class=\"muted\">No records yet.</p>";
+  return `<div class="breakdown-list">${rows.map((row) => `<div><span>${escapeHtml(label(row))}</span><strong>${row[value]}</strong></div>`).join("")}</div>`;
+}
+
+async function loadSubscriberOverview() {
+  const overview = await adminApi("/subscribers/overview");
+  const metrics = [overview.total, overview.current_access, overview.windows.renewing_30 || 0, overview.windows.expiring_30 || 0];
+  document.querySelectorAll("#subscriber-kpis .metric-card strong").forEach((node, index) => { node.textContent = metrics[index].toLocaleString(); });
+  $("subscriber-products").innerHTML = breakdownRows(overview.products, (row) => `${productNames[row.product_code] || row.product_code} · ${row.interval}`);
+  $("subscriber-statuses").innerHTML = breakdownRows(overview.statuses, (row) => `${row.label} (${row.status})`);
+  $("subscriber-stores").innerHTML = breakdownRows(overview.stores, (row) => storeNames[row.provider] || row.provider);
+  const movement = Object.entries(overview.movement).map(([name, events]) => ({ name, events }));
+  $("subscriber-movement").innerHTML = breakdownRows(movement, (row) => row.name.charAt(0).toUpperCase() + row.name.slice(1), "events");
+}
+
+function subscriptionDate(value) { return value ? new Date(value).toLocaleDateString() : "—"; }
+function subscriptionRowsTable(rows) {
+  return `<table class="data-table subscriber-table"><thead><tr><th>Reader</th><th>Product</th><th>Store</th><th>Status</th><th>Started</th><th>Renews / ends</th><th>Last store event</th></tr></thead><tbody>${rows.map((row) => `<tr tabindex="0" data-subscription-id="${row.id}"><td><strong>${escapeHtml(row.email || "No email")}</strong><small>${escapeHtml(row.display_name || "")}</small></td><td>${escapeHtml(productNames[row.product_code] || row.product_code)}<small>${escapeHtml(row.interval)}</small></td><td>${escapeHtml(storeNames[row.provider] || row.provider)}<small>${escapeHtml(row.environment || "")}</small></td><td><span class="status-pill status-${escapeHtml(row.status)}">${escapeHtml(row.status_label)}</span><small>${escapeHtml(row.status)}</small></td><td>${subscriptionDate(row.current_start || row.created_at)}</td><td>${subscriptionDate(row.current_end)}</td><td>${escapeHtml(row.last_event_type || "—")}<small>${subscriptionDate(row.last_event_at)}</small></td></tr>`).join("")}</tbody></table>`;
+}
+
+async function loadSubscribers(reset = false) {
+  if (reset) subscriberOffset = 0;
+  const list = $("subscriber-list");
+  list.innerHTML = "<p>Loading…</p>";
+  try {
+    const search = $("subscriber-search").value.trim();
+    const result = await adminApi(`/subscribers?search=${encodeURIComponent(search)}&limit=${subscriberPageSize}&offset=${subscriberOffset}`);
+    subscriberRows = result.subscriptions;
+    list.innerHTML = subscriberRows.length ? subscriptionRowsTable(subscriberRows) : "<p>No matching subscribers.</p>";
+    for (const row of list.querySelectorAll("tr[data-subscription-id]")) {
+      const open = () => void openSubscriberHistory(row.dataset.subscriptionId);
+      row.addEventListener("click", open);
+      row.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } });
+    }
+    $("subscriber-page").textContent = result.total ? `${subscriberOffset + 1}–${Math.min(subscriberOffset + subscriberRows.length, result.total)} of ${result.total}` : "0 records";
+    $("subscriber-prev").disabled = subscriberOffset === 0;
+    $("subscriber-next").disabled = subscriberOffset + subscriberRows.length >= result.total;
+  } catch (error) {
+    list.innerHTML = `<div class="error-state"><p>Subscribers could not be loaded: ${escapeHtml(error.message)}</p></div>`;
+  }
+}
+
+function eventLabel(provider, type) {
+  const google = { "1": "Recovered", "2": "Renewed", "3": "Cancelled", "4": "Purchased", "5": "On hold", "6": "Grace period", "7": "Restarted", "10": "Paused", "12": "Revoked", "13": "Expired" };
+  const apple = { SUBSCRIBED: "Subscribed", DID_RENEW: "Renewed", DID_CHANGE_RENEWAL_STATUS: "Renewal changed", DID_FAIL_TO_RENEW: "Billing retry", GRACE_PERIOD_EXPIRED: "Grace expired", EXPIRED: "Expired", REFUND: "Refunded", REVOKE: "Revoked" };
+  return (provider === "google_play" ? google[type] : apple[type]) || type;
+}
+
+async function openSubscriberHistory(id) {
+  const dialog = $("subscriber-dialog");
+  $("subscriber-events").innerHTML = "<p>Loading…</p>";
+  dialog.showModal();
+  try {
+    const result = await adminApi(`/subscribers/${id}/events`);
+    $("subscriber-dialog-title").textContent = result.subscription.email || "Subscriber history";
+    $("subscriber-events").innerHTML = result.events.length
+      ? `<div class="event-timeline">${result.events.map((event) => `<div><span></span><section><strong>${escapeHtml(eventLabel(result.subscription.provider, event.event_type))}</strong><small>${escapeHtml(event.event_type)} · ${new Date(event.created_at).toLocaleString()}</small><p>${event.processed_at ? "Processed" : "Recorded, awaiting processing"}</p></section></div>`).join("")}</div>`
+      : "<p>No store webhook events are recorded for this subscription.</p>";
+  } catch (error) { $("subscriber-events").innerHTML = `<div class="error-state"><p>${escapeHtml(error.message)}</p></div>`; }
+}
+
+async function loadSubscriberWorkspace() {
+  await Promise.allSettled([loadSubscriberOverview(), loadSubscribers()]);
+}
+
+async function exportSubscribers() {
+  try {
+    const search = $("subscriber-search").value.trim();
+    const all = [];
+    let offset = 0;
+    while (true) {
+      const result = await adminApi(`/subscribers?search=${encodeURIComponent(search)}&limit=200&offset=${offset}`);
+      all.push(...result.subscriptions);
+      offset += result.subscriptions.length;
+      if (!result.subscriptions.length || offset >= result.total) break;
+    }
+    if (!all.length) return alert("There are no subscribers to export.");
+    const quote = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const rows = [["email","name","product","interval","store","environment","status","store_status","started","renews_or_ends","last_store_event","last_event_at"], ...all.map((row) => [row.email,row.display_name,productNames[row.product_code] || row.product_code,row.interval,storeNames[row.provider] || row.provider,row.environment,row.status_label,row.status,row.current_start || row.created_at,row.current_end,row.last_event_type,row.last_event_at])];
+    const csv = rows.map((row) => row.map(quote).join(",")).join("\r\n");
+    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); link.download = "ibsi-subscribers.csv"; link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  } catch (error) { alert(`Export failed: ${error.message}`); }
+}
 function escapeHtml(value) { const node = document.createElement("div"); node.textContent = String(value ?? ""); return node.innerHTML; }
 
 function closeHelp(exceptButton) {
@@ -317,6 +417,7 @@ const tabTitles = {
   news: ["Notifications", "News notifications"],
   message: ["Notifications", "Compose message"],
   history: ["Notifications", "Notification history"],
+  subscribers: ["Subscribers", "Subscriber operations"],
   "app-status": ["App management", "Status & notices"],
   numbers: ["App management", "Usage numbers"]
 };
@@ -324,7 +425,7 @@ const tabTitles = {
 function switchTab(button) {
   const tab = button.dataset.tab;
   document.querySelectorAll(".subnav button[data-tab]").forEach((item) => item.classList.toggle("active", item === button));
-  for (const name of ["news", "message", "history", "app-status", "numbers"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
+  for (const name of ["news", "message", "history", "subscribers", "app-status", "numbers"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
   $("preview-panel").hidden = !["news", "message"].includes(tab);
   const section = button.closest(".nav-group");
   document.querySelectorAll(".nav-group").forEach((group) => {
@@ -337,6 +438,7 @@ function switchTab(button) {
   $("console").classList.remove("sidebar-open");
   $("menu-toggle").setAttribute("aria-expanded", "false");
   if (tab === "history") void loadHistory();
+  if (tab === "subscribers") void loadSubscriberWorkspace();
   if (tab === "app-status") void loadAppStatus();
   if (tab === "numbers") void loadNumbers();
 }
@@ -368,6 +470,13 @@ $("notice-off").addEventListener("click", switchNoticeOff);
 for (const id of ["notice-level", "notice-title", "notice-message"]) $(id).addEventListener("input", updateNoticePreview);
 $("numbers-days").addEventListener("change", loadNumbers);
 $("numbers-export").addEventListener("click", exportNumbers);
+$("subscribers-refresh").addEventListener("click", loadSubscriberWorkspace);
+let subscriberSearchTimer;
+$("subscriber-search").addEventListener("input", () => { clearTimeout(subscriberSearchTimer); subscriberSearchTimer = setTimeout(() => void loadSubscribers(true), 300); });
+$("subscriber-prev").addEventListener("click", () => { subscriberOffset = Math.max(0, subscriberOffset - subscriberPageSize); void loadSubscribers(); });
+$("subscriber-next").addEventListener("click", () => { subscriberOffset += subscriberPageSize; void loadSubscribers(); });
+$("subscriber-export").addEventListener("click", exportSubscribers);
+$("subscriber-dialog-close").addEventListener("click", () => $("subscriber-dialog").close());
 $("google").addEventListener("click", async () => {
   if (!auth) return;
   $("auth-error").textContent = "";
