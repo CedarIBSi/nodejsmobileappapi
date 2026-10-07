@@ -119,12 +119,24 @@ async function countAudience() {
   catch (error) { $("audience-count").textContent = error.message; }
 }
 async function loadHistory() {
-  const { broadcasts } = await api("/broadcasts?limit=50"); $("history").innerHTML = "";
-  for (const item of broadcasts) {
-    const row = document.createElement("div"); row.className = "row";
-    row.innerHTML = `<span class="badge">${escapeHtml(item.kind)}</span><div><strong>${escapeHtml(item.title || item.headline || "Untitled")}</strong><p>${new Date(item.created_at).toLocaleString()} · ${escapeHtml(item.requested_by_name || "Deleted user")} · ${escapeHtml(JSON.stringify(item.audience))}</p><p>${escapeHtml(item.status)} · targeted ${item.target_count} · accepted ${item.accepted_count} · delivered ${item.delivered_count} · failed ${item.failed_count}</p></div>${item.status === "scheduled" ? '<div class="row-actions"><button class="cancel">Cancel</button></div>' : ""}`;
-    row.querySelector(".cancel")?.addEventListener("click", async () => { if (!confirm("Cancel this scheduled notification?")) return; try { await api(`/broadcasts/${item.id}`, { method: "DELETE" }); await loadHistory(); } catch (error) { status(error.message, true); } });
-    $("history").append(row);
+  const history = $("history");
+  history.innerHTML = "<p>Loading…</p>";
+  try {
+    const { broadcasts } = await api("/broadcasts?limit=50");
+    history.innerHTML = "";
+    if (!broadcasts.length) {
+      history.innerHTML = "<p>No broadcasts yet. Test messages sent with <strong>Send to me</strong> are not recorded here.</p>";
+      return;
+    }
+    for (const item of broadcasts) {
+      const row = document.createElement("div"); row.className = "row";
+      row.innerHTML = `<span class="badge">${escapeHtml(item.kind)}</span><div><strong>${escapeHtml(item.title || item.headline || "Untitled")}</strong><p>${new Date(item.created_at).toLocaleString()} · ${escapeHtml(item.requested_by_name || "Deleted user")} · ${escapeHtml(JSON.stringify(item.audience))}</p><p>${escapeHtml(item.status)} · targeted ${item.target_count} · accepted ${item.accepted_count} · delivered ${item.delivered_count} · failed ${item.failed_count}</p></div>${item.status === "scheduled" ? '<div class="row-actions"><button class="cancel">Cancel</button></div>' : ""}`;
+      row.querySelector(".cancel")?.addEventListener("click", async () => { if (!confirm("Cancel this scheduled notification?")) return; try { await api(`/broadcasts/${item.id}`, { method: "DELETE" }); await loadHistory(); } catch (error) { status(error.message, true); } });
+      history.append(row);
+    }
+  } catch (error) {
+    history.innerHTML = `<div class="error-state"><p>History could not be loaded: ${escapeHtml(error.message)}</p><button type="button" class="secondary retry-history">Retry</button></div>`;
+    history.querySelector(".retry-history")?.addEventListener("click", () => void loadHistory());
   }
 }
 function escapeHtml(value) { const node = document.createElement("div"); node.textContent = String(value ?? ""); return node.innerHTML; }
