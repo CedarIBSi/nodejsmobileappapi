@@ -6,76 +6,83 @@
   <title>IBSi Admin Console</title>
   <link rel="stylesheet" href="/admin/notifications/styles.css">
   <link rel="stylesheet" href="/admin/notifications/help.css">
+  <link rel="stylesheet" href="/admin/notifications/admin-shell.css">
 </head>
 <body>
-  <header><div><strong>IBSi</strong><span>Admin console</span></div><button id="sign-out" hidden>Sign out</button></header>
-  <main>
-    <section id="sign-in" class="card auth">
-      <h1>IBSi admin console</h1><p>Sign in with your IBSi work account.</p>
-      <div class="actions"><button id="google">Continue with Google</button><button id="microsoft">Continue with Microsoft</button></div>
+  <section id="sign-in" class="auth-screen">
+    <div class="auth-brand"><span class="brand-orbit">i</span><span><strong>IBS</strong> intelligence</span></div>
+    <div class="card auth-card">
+      <p class="eyebrow">Secure administration</p><h1>Welcome to the IBSi console</h1><p>Sign in with your IBSi work account to continue.</p>
+      <div class="actions"><button id="google">Continue with Google</button><button id="microsoft" class="secondary">Continue with Microsoft</button></div>
       <p id="auth-error" class="error"></p>
-    </section>
-    <section id="denied" class="card" hidden><h1>Sending rights required</h1><p>Ask an administrator for sending rights.</p></section>
-    <section id="console" hidden>
-      <div class="identity"><span id="identity"></span><span id="role" class="badge"></span></div>
-      <nav><button data-tab="news" class="active">News</button><button data-tab="message">Message</button><button data-tab="history">History</button><button data-tab="app-status">Status</button><button data-tab="numbers">Numbers</button></nav>
-      <div class="workspace">
-        <section class="card panel" id="news-panel">
-          <div class="panel-heading"><h2>Latest news</h2><button type="button" class="help-button" aria-expanded="false" aria-controls="help-news" aria-label="Help for Latest news">?</button></div>
-          <div id="help-news" class="help-popover" hidden>Select an article to preview it. <strong>Send to me</strong> tests it on your registered devices. <strong>Send to everyone</strong> immediately sends the headline and image to all registered devices.</div>
-          <div id="articles" class="list"><p>Loading…</p></div>
-        </section>
-        <section class="card panel" id="message-panel" hidden>
-          <h2>Message</h2>
-          <label for="title"><span class="field-heading">Title <span id="title-count">0 / 65</span><button type="button" class="help-button" aria-expanded="false" aria-controls="help-title" aria-label="Help for Title">?</button></span><span id="help-title" class="help-popover" hidden>The bold notification heading. Example: <strong>New Journal Edition Available</strong>.</span><input id="title" maxlength="200" value="IBS Intelligence"></label>
-          <label for="body"><span class="field-heading">Body <span id="body-count">0 / 240</span><button type="button" class="help-button" aria-expanded="false" aria-controls="help-body" aria-label="Help for Body">?</button></span><span id="help-body" class="help-popover" hidden>The short message shown below the title. Example: <strong>Read the October edition in the app now.</strong></span><textarea id="body" maxlength="1000" rows="5"></textarea></label>
-          <label for="image"><span class="field-heading">Image URL <button type="button" class="help-button" aria-expanded="false" aria-controls="help-image" aria-label="Help for Image URL">?</button></span><span id="help-image" class="help-popover" hidden>Optional. Paste a public HTTPS image address ending in an image file, for example <strong>https://example.com/journal-cover.jpg</strong>. A webpage address will not work.</span><input id="image" type="url" placeholder="https://…"></label>
-          <label for="target-type"><span class="field-heading">Opens <button type="button" class="help-button" aria-expanded="false" aria-controls="help-opens" aria-label="Help for Opens">?</button></span><span id="help-opens" class="help-popover" hidden>Choose what opens when the reader taps the notification. Use <strong>Journal</strong> for a journal announcement, <strong>Article ID</strong> for one news item, or <strong>Web URL</strong> for a website.</span><select id="target-type"><option value="screen:news">News</option><option value="screen:exclusive">Exclusive</option><option value="screen:journal">Journal</option><option value="screen:subscribe">Subscribe</option><option value="screen:events">Events</option><option value="screen:about">About</option><option value="article">Article ID</option><option value="url">Web URL</option></select></label>
-          <label id="target-value-wrap" for="target-value" hidden><span class="field-heading">Target <button type="button" class="help-button" aria-expanded="false" aria-controls="help-target" aria-label="Help for Target">?</button></span><span id="help-target" class="help-popover" hidden>For <strong>Article ID</strong>, enter only the WordPress number, for example <strong>12345</strong>. For <strong>Web URL</strong>, enter the complete HTTPS address, for example <strong>https://www.ibsintelligence.com/</strong>.</span><input id="target-value"></label>
-          <label for="audience"><span class="field-heading">Audience <button type="button" class="help-button" aria-expanded="false" aria-controls="help-audience" aria-label="Help for Audience">?</button></span><span id="help-audience" class="help-popover" hidden>Choose who receives the notification. <strong>Everyone</strong> means every registered device; the other choices limit it by platform, subscription, or entitlement.</span><select id="audience"><option value='{"type":"all"}'>Everyone</option><option value='{"type":"platform","platform":"ios"}'>iOS</option><option value='{"type":"platform","platform":"android"}'>Android</option><option value='{"type":"subscribers"}'>Subscribers</option><option value='{"type":"free"}'>Free readers</option><option value='{"type":"entitlement","entitlement_type":"insights"}'>Insights subscribers</option><option value='{"type":"entitlement","entitlement_type":"journal_india"}'>India Journal</option><option value='{"type":"entitlement","entitlement_type":"journal_global"}'>Global Journal</option></select><small id="audience-count">Counting devices…</small></label>
-          <label for="scheduled-at"><span class="field-heading">Send at <button type="button" class="help-button" aria-expanded="false" aria-controls="help-schedule" aria-label="Help for Send at">?</button></span><span id="help-schedule" class="help-popover" hidden>Optional. Choose a future date and time to schedule the notification. Leave it blank to send immediately.</span><input id="scheduled-at" type="datetime-local"><small>Leave blank to send now.</small></label>
-          <div class="actions"><button id="message-preview" class="secondary">Send to me</button><button id="message-send">Send to everyone</button></div>
-        </section>
-        <section class="card panel wide-panel" id="history-panel" hidden><h2>History</h2><div id="history" class="list"><p>Loading…</p></div></section>
-        <section class="card panel wide-panel" id="app-status-panel" hidden>
-          <h2>App status</h2>
-          <p id="app-status-meta" class="muted">Loading current settings…</p>
-          <div class="admin-grid">
-            <form id="update-gate-form" class="subcard">
-              <h3>Update gate</h3>
-              <p class="muted">Build is optional and is checked only when the version matches.</p>
-              <div class="form-grid">
-                <label for="min-ios-version">iOS minimum version<input id="min-ios-version" required pattern="\d+\.\d+\.\d+" placeholder="0.3.0"></label>
-                <label for="min-ios-build">iOS minimum build<input id="min-ios-build" type="number" min="0" placeholder="Optional"></label>
-                <label for="min-android-version">Android minimum version<input id="min-android-version" required pattern="\d+\.\d+\.\d+" placeholder="0.3.0"></label>
-                <label for="min-android-build">Android minimum build<input id="min-android-build" type="number" min="0" placeholder="Optional"></label>
-              </div>
-              <label for="update-message">Reader message<textarea id="update-message" maxlength="500" rows="3" required></textarea></label>
-              <button type="submit">Review and save gate</button>
-            </form>
-            <form id="notice-form" class="subcard">
-              <h3>Service notice</h3>
-              <label class="check-label" for="notice-active"><input id="notice-active" type="checkbox"> Notice active</label>
-              <label for="notice-level">Level<select id="notice-level"><option value="info">Info</option><option value="warning">Warning</option></select></label>
-              <label for="notice-title">Title<input id="notice-title" maxlength="120" placeholder="Planned maintenance"></label>
-              <label for="notice-message">Message<textarea id="notice-message" maxlength="500" rows="3" placeholder="Some content may be temporarily unavailable."></textarea></label>
-              <label for="notice-link">Optional link<input id="notice-link" type="url" placeholder="https://…"></label>
-              <label for="notice-until">Optional end time<input id="notice-until" type="datetime-local"></label>
-              <div id="notice-preview" class="notice-preview info"><strong>Service notice preview</strong><p>Your message will appear here.</p></div>
-              <div class="actions"><button type="submit">Save notice</button><button id="notice-off" type="button" class="secondary">Switch off</button></div>
-            </form>
+    </div>
+  </section>
+  <section id="denied" class="auth-screen" hidden><div class="card auth-card"><h1>Administrator access required</h1><p>Your account is signed in but does not have admin rights.</p><button id="denied-sign-out" class="secondary">Sign out</button></div></section>
+
+  <section id="console" class="admin-shell" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="brand"><span class="brand-orbit">i</span><span class="brand-name"><strong>IBS</strong> intelligence<small>ADMIN CONSOLE</small></span></div>
+      <nav class="side-nav" aria-label="Administration">
+        <div class="nav-group open" data-section="notifications">
+          <button type="button" class="nav-section active" data-section-button="notifications"><span class="nav-icon">✦</span><span>Notifications</span><span class="chevron">⌄</span></button>
+          <div class="subnav">
+            <button type="button" data-tab="news" class="active">News</button>
+            <button type="button" data-tab="message">Message</button>
+            <button type="button" data-tab="history">History</button>
           </div>
-          <p id="app-status-result"></p>
-        </section>
-        <section class="card panel wide-panel" id="numbers-panel" hidden>
-          <div class="panel-heading"><h2>Numbers</h2><select id="numbers-days" class="compact-select"><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select><button id="numbers-export" type="button" class="secondary">Export CSV</button></div>
-          <p class="muted">Daily events with distinct installations and signed-in readers.</p>
-          <div id="numbers-table" class="table-wrap"><p>Choose this tab to load the latest numbers.</p></div>
-        </section>
-        <aside class="card preview" id="preview-panel"><h2>Preview</h2><div class="phone"><div class="notification"><div class="app-icon">I</div><div><strong id="preview-title">IBS Intelligence</strong><p id="preview-body">Choose an article or write a message.</p><img id="preview-image" hidden></div></div></div><p id="status"></p></aside>
+        </div>
+        <div class="nav-group" data-section="app-management">
+          <button type="button" class="nav-section" data-section-button="app-management"><span class="nav-icon">◫</span><span>App management</span><span class="chevron">⌄</span></button>
+          <div class="subnav">
+            <button type="button" data-tab="app-status">Status & notices</button>
+            <button type="button" data-tab="numbers">Usage numbers</button>
+          </div>
+        </div>
+      </nav>
+      <div class="sidebar-user">
+        <span id="admin-avatar" class="avatar">A</span><span class="user-copy"><strong id="identity">Administrator</strong><small id="role">admin</small></span>
+        <button id="sign-out" type="button" class="icon-button" aria-label="Sign out" title="Sign out">↪</button>
       </div>
-    </section>
-  </main>
+    </aside>
+
+    <div class="admin-main">
+      <header class="topbar">
+        <button id="menu-toggle" type="button" class="menu-toggle" aria-label="Open navigation" aria-expanded="false">☰</button>
+        <div><p id="section-label" class="eyebrow">Notifications</p><h1 id="page-title">News notifications</h1></div>
+        <span id="top-role" class="badge">admin</span>
+      </header>
+      <main class="admin-content">
+        <div class="workspace">
+          <section class="card panel" id="news-panel">
+            <div class="panel-heading"><div><h2>Latest news</h2><p class="muted">Send a published article to readers.</p></div><button type="button" class="help-button" aria-expanded="false" aria-controls="help-news" aria-label="Help for Latest news">?</button></div>
+            <div id="help-news" class="help-popover" hidden>Select an article to preview it. <strong>Send to me</strong> tests it on your registered devices. <strong>Send to everyone</strong> immediately sends the headline and image to all registered devices.</div>
+            <div id="articles" class="list"><p>Loading…</p></div>
+          </section>
+          <section class="card panel" id="message-panel" hidden>
+            <h2>Compose message</h2><p class="muted">Create a notification that opens an app screen, article, or webpage.</p>
+            <label for="title"><span class="field-heading">Title <span id="title-count">0 / 65</span><button type="button" class="help-button" aria-expanded="false" aria-controls="help-title" aria-label="Help for Title">?</button></span><span id="help-title" class="help-popover" hidden>The bold notification heading. Example: <strong>New Journal Edition Available</strong>.</span><input id="title" maxlength="200" value="IBS Intelligence"></label>
+            <label for="body"><span class="field-heading">Body <span id="body-count">0 / 240</span><button type="button" class="help-button" aria-expanded="false" aria-controls="help-body" aria-label="Help for Body">?</button></span><span id="help-body" class="help-popover" hidden>The short message shown below the title. Example: <strong>Read the October edition in the app now.</strong></span><textarea id="body" maxlength="1000" rows="5"></textarea></label>
+            <label for="image"><span class="field-heading">Image URL <button type="button" class="help-button" aria-expanded="false" aria-controls="help-image" aria-label="Help for Image URL">?</button></span><span id="help-image" class="help-popover" hidden>Optional. Paste a public HTTPS image address ending in an image file, for example <strong>https://example.com/journal-cover.jpg</strong>.</span><input id="image" type="url" placeholder="https://…"></label>
+            <div class="form-grid"><label for="target-type"><span class="field-heading">Opens <button type="button" class="help-button" aria-expanded="false" aria-controls="help-opens" aria-label="Help for Opens">?</button></span><span id="help-opens" class="help-popover" hidden>Choose what opens when the reader taps the notification.</span><select id="target-type"><option value="screen:news">News</option><option value="screen:exclusive">Exclusive</option><option value="screen:journal">Journal</option><option value="screen:subscribe">Subscribe</option><option value="screen:events">Events</option><option value="screen:about">About</option><option value="article">Article ID</option><option value="url">Web URL</option></select></label><label id="target-value-wrap" for="target-value" hidden><span class="field-heading">Target <button type="button" class="help-button" aria-expanded="false" aria-controls="help-target" aria-label="Help for Target">?</button></span><span id="help-target" class="help-popover" hidden>Use a WordPress number such as <strong>12345</strong>, or a complete HTTPS URL.</span><input id="target-value"></label></div>
+            <div class="form-grid"><label for="audience"><span class="field-heading">Audience <button type="button" class="help-button" aria-expanded="false" aria-controls="help-audience" aria-label="Help for Audience">?</button></span><span id="help-audience" class="help-popover" hidden>Choose who receives this notification.</span><select id="audience"><option value='{"type":"all"}'>Everyone</option><option value='{"type":"platform","platform":"ios"}'>iOS</option><option value='{"type":"platform","platform":"android"}'>Android</option><option value='{"type":"subscribers"}'>Subscribers</option><option value='{"type":"free"}'>Free readers</option><option value='{"type":"entitlement","entitlement_type":"insights"}'>Insights subscribers</option><option value='{"type":"entitlement","entitlement_type":"journal_india"}'>India Journal</option><option value='{"type":"entitlement","entitlement_type":"journal_global"}'>Global Journal</option></select><small id="audience-count">Counting devices…</small></label><label for="scheduled-at"><span class="field-heading">Send at <button type="button" class="help-button" aria-expanded="false" aria-controls="help-schedule" aria-label="Help for Send at">?</button></span><span id="help-schedule" class="help-popover" hidden>Choose a future time or leave blank to send now.</span><input id="scheduled-at" type="datetime-local"><small>Leave blank to send now.</small></label></div>
+            <div class="actions"><button id="message-preview" class="secondary">Send to me</button><button id="message-send">Send notification</button></div>
+          </section>
+          <section class="card panel wide-panel" id="history-panel" hidden><h2>Notification history</h2><p class="muted">Delivery and scheduling records for audience broadcasts.</p><div id="history" class="list"><p>Loading…</p></div></section>
+
+          <section class="card panel wide-panel" id="app-status-panel" hidden>
+            <div class="panel-heading"><div><h2>Status & notices</h2><p id="app-status-meta" class="muted">Loading current settings…</p></div></div>
+            <div class="admin-grid">
+              <form id="update-gate-form" class="subcard"><span class="section-kicker">RELEASE CONTROL</span><h3>Update gate</h3><p class="muted">Set the oldest supported release. Build is checked only when the version matches.</p><div class="form-grid"><label for="min-ios-version">iOS minimum version<input id="min-ios-version" required pattern="\d+\.\d+\.\d+" placeholder="0.3.0"></label><label for="min-ios-build">iOS minimum build<input id="min-ios-build" type="number" min="0" placeholder="Optional"></label><label for="min-android-version">Android minimum version<input id="min-android-version" required pattern="\d+\.\d+\.\d+" placeholder="0.3.0"></label><label for="min-android-build">Android minimum build<input id="min-android-build" type="number" min="0" placeholder="Optional"></label></div><label for="update-message">Reader message<textarea id="update-message" maxlength="500" rows="3" required></textarea></label><button type="submit">Review and save gate</button></form>
+              <form id="notice-form" class="subcard"><span class="section-kicker">IN-APP COMMUNICATION</span><h3>Service notice</h3><label class="check-label" for="notice-active"><input id="notice-active" type="checkbox"> Notice active</label><label for="notice-level">Level<select id="notice-level"><option value="info">Info</option><option value="warning">Warning</option></select></label><label for="notice-title">Title<input id="notice-title" maxlength="120" placeholder="Planned maintenance"></label><label for="notice-message">Message<textarea id="notice-message" maxlength="500" rows="3" placeholder="Some content may be temporarily unavailable."></textarea></label><div class="form-grid"><label for="notice-link">Optional link<input id="notice-link" type="url" placeholder="https://…"></label><label for="notice-until">Optional end time<input id="notice-until" type="datetime-local"></label></div><div id="notice-preview" class="notice-preview info"><strong>Service notice preview</strong><p>Your message will appear here.</p></div><div class="actions"><button type="submit">Save notice</button><button id="notice-off" type="button" class="secondary">Switch off</button></div></form>
+            </div><p id="app-status-result"></p>
+          </section>
+          <section class="card panel wide-panel" id="numbers-panel" hidden><div class="panel-heading"><div><h2>Usage numbers</h2><p class="muted">Daily product activity, installations, and signed-in readers.</p></div><select id="numbers-days" class="compact-select"><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select><button id="numbers-export" type="button" class="secondary">Export CSV</button></div><div id="numbers-table" class="table-wrap"><p>Choose this page to load the latest numbers.</p></div></section>
+          <aside class="card preview" id="preview-panel"><span class="section-kicker">DEVICE PREVIEW</span><h2>Notification</h2><div class="phone"><div class="notification"><div class="app-icon">I</div><div><strong id="preview-title">IBS Intelligence</strong><p id="preview-body">Choose an article or write a message.</p><img id="preview-image" hidden></div></div></div><p id="status"></p></aside>
+        </div>
+      </main>
+    </div>
+    <button id="sidebar-scrim" class="sidebar-scrim" aria-label="Close navigation"></button>
+  </section>
   <script src="/admin/firebase-config.js"></script>
   <script type="module" src="/admin/notifications/app.js"></script>
 </body>

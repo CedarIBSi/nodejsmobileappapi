@@ -313,13 +313,49 @@ for (const button of document.querySelectorAll(".help-button")) button.addEventL
 document.addEventListener("click", () => closeHelp());
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeHelp(); });
 
-for (const button of document.querySelectorAll("nav button")) button.addEventListener("click", () => {
-  document.querySelectorAll("nav button").forEach((item) => item.classList.toggle("active", item === button));
+const tabTitles = {
+  news: ["Notifications", "News notifications"],
+  message: ["Notifications", "Compose message"],
+  history: ["Notifications", "Notification history"],
+  "app-status": ["App management", "Status & notices"],
+  numbers: ["App management", "Usage numbers"]
+};
+
+function switchTab(button) {
+  const tab = button.dataset.tab;
+  document.querySelectorAll(".subnav button[data-tab]").forEach((item) => item.classList.toggle("active", item === button));
   for (const name of ["news", "message", "history", "app-status", "numbers"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
-  $("preview-panel").hidden = !["news", "message"].includes(button.dataset.tab);
-  if (button.dataset.tab === "history") void loadHistory();
-  if (button.dataset.tab === "app-status") void loadAppStatus();
-  if (button.dataset.tab === "numbers") void loadNumbers();
+  $("preview-panel").hidden = !["news", "message"].includes(tab);
+  const section = button.closest(".nav-group");
+  document.querySelectorAll(".nav-group").forEach((group) => {
+    group.classList.toggle("open", group === section);
+    group.querySelector(".nav-section")?.classList.toggle("active", group === section);
+  });
+  const [sectionLabel, pageTitle] = tabTitles[tab];
+  $("section-label").textContent = sectionLabel;
+  $("page-title").textContent = pageTitle;
+  $("console").classList.remove("sidebar-open");
+  $("menu-toggle").setAttribute("aria-expanded", "false");
+  if (tab === "history") void loadHistory();
+  if (tab === "app-status") void loadAppStatus();
+  if (tab === "numbers") void loadNumbers();
+}
+
+for (const button of document.querySelectorAll(".subnav button[data-tab]")) button.addEventListener("click", () => switchTab(button));
+for (const button of document.querySelectorAll(".nav-section")) button.addEventListener("click", () => {
+  const group = button.closest(".nav-group");
+  const alreadyOpen = group.classList.contains("open");
+  document.querySelectorAll(".nav-group").forEach((item) => item.classList.remove("open"));
+  if (!alreadyOpen) group.classList.add("open");
+  if (!alreadyOpen) group.querySelector(".subnav button[data-tab]")?.click();
+});
+$("menu-toggle").addEventListener("click", () => {
+  const open = $("console").classList.toggle("sidebar-open");
+  $("menu-toggle").setAttribute("aria-expanded", String(open));
+});
+$("sidebar-scrim").addEventListener("click", () => {
+  $("console").classList.remove("sidebar-open");
+  $("menu-toggle").setAttribute("aria-expanded", "false");
 });
 for (const id of ["title", "body", "image"]) $(id).addEventListener("input", updatePreview);
 $("target-type").addEventListener("change", () => { $("target-value-wrap").hidden = $("target-type").value.startsWith("screen:"); });
@@ -347,6 +383,7 @@ $("microsoft").addEventListener("click", async () => {
   catch (error) { $("auth-error").textContent = `${error.code || "auth/error"}: ${error.message}`; }
 });
 $("sign-out").addEventListener("click", () => auth && signOut(auth));
+$("denied-sign-out").addEventListener("click", () => auth && signOut(auth));
 
 if (!auth) $("auth-error").textContent = "Firebase Web API settings are not configured on this server.";
 else onAuthStateChanged(auth, async (user) => {
@@ -356,7 +393,9 @@ else onAuthStateChanged(auth, async (user) => {
     token = await user.getIdToken();
     await authApi("/sync-user", { method: "POST" });
     const { user: profile } = await authApi("/me");
-    $("identity").textContent = profile.display_name || profile.email || "Signed in"; $("role").textContent = profile.role;
+    const identity = profile.display_name || profile.email || "Signed in";
+    $("identity").textContent = identity; $("role").textContent = profile.role; $("top-role").textContent = profile.role;
+    $("admin-avatar").textContent = identity.trim().charAt(0).toUpperCase() || "A";
     if (!["admin", "super_admin"].includes(profile.role)) { $("denied").hidden = false; return; }
     $("console").hidden = false;
     updatePreview();
