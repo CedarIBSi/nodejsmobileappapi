@@ -402,6 +402,24 @@ The outer notification and nested transaction are cryptographically verified aga
 
 Public and cached. Returns `items[]` in the stable Home-card shape: `content_type`, `content_id`, `title`, `excerpt`, `image_url`, `published_at`, `link`. At most one card per source, in order: `blog`, `leadership_interview`, `case_study`, `news`, each the newest post of that type assigned to the `editor_s_picks` term whose slug is `fintech-focus` ("FinTech Focus" in WordPress). A card is only built when the returned post actually carries the term: WordPress ignores a taxonomy filter on a post type the taxonomy is not attached to and would otherwise answer with that type's newest post. So until the taxonomy is attached to blogs, interviews and case studies in WordPress, only the news card appears. The Journal is not sent here (it was for one deploy, 75c523c); its covers are at `GET /v1/journals/latest`. An absent term or no assigned post returns `{ "items": [] }`, not an error.
 
+#### `GET /v1/home/perspective`
+
+Public and cached for 300 seconds. Returns the single editorially curated IBSi Perspective card from `home_perspective`:
+
+```json
+{
+  "perspective": {
+    "article_id": null,
+    "title": "Banks recalibrate as resilience becomes the new technology mandate",
+    "image_url": "https://ibsintelligence.com/wp-content/uploads/2026/03/IBSi-West-Asia-Crisis-1x1-MPU-1-1536x1536.png",
+    "link": "https://ibsintelligence.com/banks-recalibrate-as-resilience-becomes-the-new-technology-mandate-2/",
+    "updated_at": "2026-10-09T12:00:00.000Z"
+  }
+}
+```
+
+`article_id` is optional: when present the app may open its native article detail; when null it opens `link`. The endpoint returns `{ "perspective": null }` when the row is inactive, expired, or has an empty title, image, or link. Editors manage the singleton row (`id = 1`) in pgAdmin. Set `is_active = false` to hide it, use `ends_at` for automatic expiry, and always set `updated_at = now()` when changing its content so clients can identify the revision. Migration `037_home_perspective.sql` creates and seeds the row and must be recorded in `schema_migrations` before this route is deployed.
+
 #### `GET /v1/journals/latest`
 
 Public and cached. The newest published issue of each edition, India then Global: `journals[]` with `journal_id`, `title`, `issue_no`, `month`, `year`, `edition`, `edition_type`, `image_url`, `published_date`. Cover and title only, never the PDF; opening an issue still goes through the private listing and the signed view link.
@@ -808,6 +826,7 @@ Principal tables:
 - `push_tokens`: Expo device tokens
 - `pv_ibsi_journal_data`: journal metadata and private PDF filename
 - `db_white_paper_data`: white-paper metadata and private PDF filename
+- `home_perspective`: singleton curated Perspective card shown on the app Home feed
 - `galaxy_page_content`, journal-about, awards, and house-ad tables: seeded content
 
 Every migration present in `migrations/` must also be present in `schema_migrations`; production migrations are applied manually before dependent API code is deployed.

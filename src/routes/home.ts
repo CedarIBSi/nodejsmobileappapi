@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
+import { getHomePerspective } from "../services/homePerspective.js";
 import { listHomeFeatured } from "../services/wordpress.js";
 
 export const homeRouter = Router();
@@ -18,4 +19,10 @@ homeRouter.get("/featured", asyncHandler(async (_req, res) => {
   const items = await listHomeFeatured();
   res.set("Cache-Control", "public, max-age=300");
   res.json({ items });
+}));
+
+homeRouter.get("/perspective", asyncHandler(async (_req, res) => {
+  const perspective = await getHomePerspective();
+  res.set("Cache-Control", "public, max-age=300");
+  res.json({ perspective });
 }));
