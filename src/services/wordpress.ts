@@ -364,7 +364,12 @@ type HomeFeaturedSource = {
 };
 
 const homeFeaturedTaxonomyRestBase = "editor_s_picks";
-const homeFeaturedTermSlug = "featured-news";
+/**
+ * The term the editors tick on a story to put it at the top of Home. Named
+ * "FinTech Focus" in WordPress (term 45246), confirmed by the site's
+ * developer on 2026-10-09; the slug, not the name, is what the lookup sends.
+ */
+const homeFeaturedTermSlug = "fintech-focus";
 
 /**
  * The feed omits article bodies: including them nearly doubles the page to
