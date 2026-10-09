@@ -21,6 +21,7 @@ import { awardsRouter } from "./routes/awards.js";
 import { eventsRouter } from "./routes/events.js";
 import { adsRouter } from "./routes/ads.js";
 import { homePromoRouter } from "./routes/home-promo.js";
+import { homeRouter } from "./routes/home.js";
 import { appRouter } from "./routes/app.js";
 import { adminSubscriberRouter } from "./routes/admin-subscribers.js";
 import { journalRouter } from "./routes/journals.js";
@@ -173,6 +174,7 @@ export function createApp() {
   app.use("/v1/events", eventsRouter);
   app.use("/v1/ads", adsRouter);
   app.use("/v1/home-promo", homePromoRouter);
+  app.use("/v1/home", homeRouter);
   // The app asking about itself: update gate, service notice, measurement.
   app.use("/v1/app", appRouter);
   app.use("/v1/admin/subscribers", adminSubscriberRouter);

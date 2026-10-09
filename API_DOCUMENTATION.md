@@ -398,6 +398,10 @@ The outer notification and nested transaction are cryptographically verified aga
 
 ### News
 
+#### `GET /v1/home/featured`
+
+Public and cached. Returns `items[]` in the stable Home-card shape: `content_type`, `content_id`, `title`, `excerpt`, `image_url`, `published_at`, and `link`. The first version returns at most one item: the newest `ibsi_news` post assigned to the `editor_s_picks` term whose slug is `featured-news`. An absent term or no assigned post returns `{ "items": [] }`, not an error. The source builder accepts multiple post types so Blogs, Leadership Interviews, Case Studies and Videos can be added later without changing this endpoint or its payload.
+
 #### `GET /v1/news`
 
 Public. Query: `page`, `limit`, optional numeric `category`.

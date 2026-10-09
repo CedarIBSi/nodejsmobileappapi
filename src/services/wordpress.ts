@@ -347,11 +347,94 @@ export type NewsCategoryItem = {
   name: string;
 };
 
+/** Stable Home-card shape shared by every content type we add later. */
+export type HomeFeaturedItem = {
+  content_id: string;
+  content_type: string;
+  excerpt: string | null;
+  image_url: string | null;
+  link: string;
+  published_at: string | null;
+  title: string;
+};
+
+type HomeFeaturedSource = {
+  contentType: string;
+  postTypeRestBase: string;
+};
+
+const homeFeaturedTaxonomyRestBase = "editor_s_picks";
+const homeFeaturedTermSlug = "featured-news";
+
 /**
  * The feed omits article bodies: including them nearly doubles the page to
  * carry text the list never renders. Bodies are served by getArticleBody.
  */
 const newsListFields = "id,date_gmt,link,title,excerpt,_links,_embedded";
+
+async function taxonomyTermId(taxonomyRestBase: string, slug: string): Promise<number | null> {
+  return cached(
+    `wordpress:taxonomy-term:${taxonomyRestBase}:${slug}`,
+    config().MEDIA_CACHE_TTL_SECONDS * 1000,
+    async () => {
+      const url = new URL(`/wp-json/wp/v2/${taxonomyRestBase}`, config().WORDPRESS_BASE_URL);
+      url.searchParams.set("slug", slug);
+      url.searchParams.set("per_page", "1");
+      url.searchParams.set("_fields", "id,slug");
+      const response = await wordPressRequest(url, "application/json");
+      const terms = (await response.json()) as Array<{ id?: number; slug?: string }>;
+      const id = Array.isArray(terms) ? terms[0]?.id : undefined;
+      return typeof id === "number" && Number.isInteger(id) && id > 0 ? id : null;
+    }
+  );
+}
+
+/**
+ * Builds one card per configured source. Today there is only News; later the
+ * other Home carousel sources can be added to the array without changing the
+ * endpoint or the app payload.
+ */
+async function listHomeFeaturedSources(
+  sources: HomeFeaturedSource[],
+  taxonomyRestBase: string,
+  termSlug: string
+): Promise<HomeFeaturedItem[]> {
+  const termId = await taxonomyTermId(taxonomyRestBase, termSlug);
+  if (!termId) return [];
+
+  const results: HomeFeaturedItem[] = [];
+  // Sequential by design: WordPress/Cloudflare is less reliable under bursts,
+  // and this is cached so only a cold request pays for the source lookups.
+  for (const source of sources) {
+    const { posts } = await fetchPostType(source.postTypeRestBase, 1, 1, {
+      fields: newsListFields,
+      params: { [taxonomyRestBase]: String(termId) }
+    });
+    const post = posts[0];
+    if (!post) continue;
+    results.push({
+      content_id: String(post.id),
+      content_type: source.contentType,
+      excerpt: excerptText(post.excerpt?.rendered) || null,
+      image_url: featuredImage(post),
+      link: post.link ?? "",
+      published_at: toIsoTimestamp(post.date_gmt),
+      title: toText(post.title?.rendered)
+    });
+  }
+  return results;
+}
+
+/** The first Home feature: at most one editor-selected News article. */
+export async function listHomeFeatured(): Promise<HomeFeaturedItem[]> {
+  return cached("home:featured:v1", config().MEDIA_CACHE_TTL_SECONDS * 1000, () =>
+    listHomeFeaturedSources(
+      [{ contentType: "news", postTypeRestBase: "ibsi_news" }],
+      homeFeaturedTaxonomyRestBase,
+      homeFeaturedTermSlug
+    )
+  );
+}
 
 /** Start of a rolling content window, as WordPress-compatible ISO 8601. */
 function contentWindowStart(months: number): string {
