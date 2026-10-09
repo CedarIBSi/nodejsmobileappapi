@@ -432,7 +432,11 @@ async function listHomeFeaturedSources(
 
 /** The first Home feature: at most one editor-selected News article. */
 export async function listHomeFeatured(): Promise<HomeFeaturedItem[]> {
-  return cached("home:featured:v1", config().MEDIA_CACHE_TTL_SECONDS * 1000, () =>
+  // Include the editorial selector in the key. A warm Azure worker may retain
+  // its in-memory cache across a package swap, and reusing a generic key here
+  // kept the empty result from the former `featured-news` lookup alive after
+  // editors confirmed the real term was `fintech-focus`.
+  return cached(`home:featured:v1:${homeFeaturedTermSlug}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, () =>
     listHomeFeaturedSources(
       [{ contentType: "news", postTypeRestBase: "ibsi_news" }],
       homeFeaturedTaxonomyRestBase,
