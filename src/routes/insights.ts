@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
-import { consumeInsightRead, insightAccessSchema } from "../lib/insight-meter.js";
+import {
+  consumeInsightRead,
+  getInsightMeterStatus,
+  insightAccessSchema,
+  meteredCallerSchema
+} from "../lib/insight-meter.js";
 import { resolveOptionalUser } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 
@@ -38,5 +43,34 @@ insightRouter.post(
 
     res.set("Cache-Control", "private, no-store");
     res.status(access.allowed ? 200 : 402).json({ access });
+  })
+);
+
+/**
+ * Where the allowance stands, without spending any of it: the Home tab's
+ * "3 of 5 used" meter. A POST, like /access, so the installation id travels
+ * in the body the same way; 200 whether or not the allowance is gone, since
+ * nothing is being refused.
+ */
+insightRouter.post(
+  "/status",
+  resolveOptionalUser,
+  validate(meteredCallerSchema),
+  asyncHandler(async (req, res) => {
+    const userId = req.appUser?.id ?? null;
+    const installationId = req.body.installation_id ?? null;
+    if (!userId && !installationId) {
+      res.status(400).json({
+        error: {
+          code: "INSTALLATION_ID_REQUIRED",
+          message: "installation_id is required before sign-in"
+        }
+      });
+      return;
+    }
+
+    const access = await getInsightMeterStatus({ installationId, role: req.appUser?.role, userId });
+    res.set("Cache-Control", "private, no-store");
+    res.json({ access });
   })
 );

@@ -9,6 +9,8 @@ import { asyncHandler } from "../lib/async-handler.js";
 import { type ArchiveAccess, resolveArchiveAccess } from "../lib/entitlement.js";
 import { HttpError } from "../lib/errors.js";
 import { journalLockReason } from "../lib/journal-archive.js";
+import { journalImageUrl } from "../lib/journal-image.js";
+import { listLatestJournals } from "../services/journalLatest.js";
 import { createJournalToken, verifyJournalToken } from "../lib/journal-token.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute } from "../middleware/auth.js";
@@ -95,14 +97,15 @@ function describeArchive(access: ArchiveAccess) {
   };
 }
 
-function journalImageUrl(imagePath: string | null): string | null {
-  const filename = imagePath?.trim();
-  if (!filename || path.basename(filename) !== filename) return null;
-  const baseUrl = config().JOURNAL_IMAGE_BASE_URL.endsWith("/")
-    ? config().JOURNAL_IMAGE_BASE_URL
-    : `${config().JOURNAL_IMAGE_BASE_URL}/`;
-  return new URL(encodeURIComponent(filename), baseUrl).toString();
-}
+// Public: the newest issue of each edition, cover and title only, for the
+// Home tab's Exclusive row. A cover sells the Journal to a reader without a
+// subscription; opening the issue still goes through the private listing
+// below and the signed view link.
+journalRouter.get("/latest", asyncHandler(async (_req, res) => {
+  const journals = await listLatestJournals();
+  res.set("Cache-Control", `public, max-age=${journalAboutCacheSeconds}`);
+  res.json({ journals });
+}));
 
 /**
  * The years and edition types that actually exist, so the app can offer the

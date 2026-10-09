@@ -400,7 +400,15 @@ The outer notification and nested transaction are cryptographically verified aga
 
 #### `GET /v1/home/featured`
 
-Public and cached. Returns `items[]` in the stable Home-card shape: `content_type`, `content_id`, `title`, `excerpt`, `image_url`, `published_at`, and `link`. The first version returns at most one item: the newest `ibsi_news` post assigned to the `editor_s_picks` term whose slug is `fintech-focus` ("FinTech Focus" in WordPress). An absent term or no assigned post returns `{ "items": [] }`, not an error. The source builder accepts multiple post types so Blogs, Leadership Interviews, Case Studies and Videos can be added later without changing this endpoint or its payload.
+Public and cached. Returns `items[]` in the stable Home-card shape: `content_type`, `content_id`, `title`, `excerpt`, `image_url`, `published_at`, `link`, and for journals `edition` (`india` | `global`). At most one card per source, in carousel order: `blog`, `leadership_interview`, `case_study` (the newest post of each type assigned to the `editor_s_picks` term whose slug is `fintech-focus`, "FinTech Focus" in WordPress), then `journal` (the newest issue, Global first; there is no editorial pick for the Journal), then `news` (same term). A WordPress card is only built when the returned post actually carries the term: WordPress ignores a taxonomy filter on a post type the taxonomy is not attached to and would otherwise answer with that type's newest post. So until the taxonomy is attached to blogs, interviews and case studies in WordPress, only the journal and news cards appear. An absent term or no assigned post returns `{ "items": [] }`, not an error.
+
+#### `GET /v1/journals/latest`
+
+Public and cached. The newest published issue of each edition, India then Global: `journals[]` with `journal_id`, `title`, `issue_no`, `month`, `year`, `edition`, `edition_type`, `image_url`, `published_date`. Cover and title only, never the PDF; opening an issue still goes through the private listing and the signed view link.
+
+#### `POST /v1/insights/status`
+
+Body `{ "installation_id" }`, bearer token optional. Where the reader's allowance stands without spending any of it: the `access` object of `POST /v1/insights/access` plus `free_reads` (the monthly allowance) and `used_free_reads`. Always 200. Signed in, reads made on this installation before sign-in are counted too, since the first metered open merges them.
 
 #### `GET /v1/news`
 

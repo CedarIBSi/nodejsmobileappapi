@@ -195,6 +195,46 @@ export async function consumeInsightRead(input: MeterInput): Promise<InsightAcce
   });
 }
 
+export type InsightMeterStatus = InsightAccess & {
+  /** The monthly allowance, so the app draws the right number of segments. */
+  free_reads: number;
+  /** Distinct items opened this month. Zero for premium and staff. */
+  used_free_reads: number;
+};
+
+/**
+ * Where the reader's allowance stands, for the Home tab's meter. Never
+ * spends a read: POST /access is the only place that does. Signed in, the
+ * reads this installation made before signing in count too, since the first
+ * metered open will merge them into the account; without that a reader would
+ * see "0 of 5" on Home and then be refused on the first item.
+ */
+export async function getInsightMeterStatus(reader: Reader): Promise<InsightMeterStatus> {
+  if (isStaffRole(reader.role)) return { ...premium(), free_reads: freeInsightReads, used_free_reads: 0 };
+  if (reader.userId && (await hasEntitlement(reader.userId, reader.role, "insights"))) {
+    return { ...premium(), free_reads: freeInsightReads, used_free_reads: 0 };
+  }
+
+  const periodResult = await query<{ period_start: string }>(periodStartSql);
+  const periodStart = periodResult.rows[0]!.period_start;
+  const counts = await Promise.all(
+    [
+      reader.userId ? (["user_id", reader.userId] as const) : null,
+      reader.installationId ? (["installation_id", reader.installationId] as const) : null
+    ]
+      .filter((identity): identity is readonly ["user_id" | "installation_id", string] => identity !== null)
+      .map(([column, value]) =>
+        query<{ count: string }>(
+          `SELECT count(*) FROM insight_access WHERE ${column} = $1 AND period_start = $2`,
+          [value, periodStart]
+        ).then((result) => Number(result.rows[0]?.count ?? 0))
+      )
+  );
+  const used = Math.min(freeInsightReads, counts.reduce((sum, count) => sum + count, 0));
+  const base = used >= freeInsightReads ? denied(reader) : free(freeInsightReads - used);
+  return { ...base, free_reads: freeInsightReads, used_free_reads: used };
+}
+
 /**
  * Whether this reader may be served the item now: premium, staff, or a read
  * already spent on it this month. Never spends one itself.

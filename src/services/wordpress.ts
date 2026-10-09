@@ -351,6 +351,8 @@ export type NewsCategoryItem = {
 export type HomeFeaturedItem = {
   content_id: string;
   content_type: string;
+  /** Journal cards only: which edition the issue belongs to, for the app's switcher. */
+  edition?: "india" | "global" | null;
   excerpt: string | null;
   image_url: string | null;
   link: string;
@@ -362,6 +364,19 @@ type HomeFeaturedSource = {
   contentType: string;
   postTypeRestBase: string;
 };
+
+/**
+ * The carousel's WordPress sources, in the order the cards appear: blogs,
+ * leadership interviews, case studies, then news. The Journal card is added
+ * by the route from Postgres. Each source yields at most one card, the
+ * newest post carrying the term.
+ */
+const homeFeaturedSources: HomeFeaturedSource[] = [
+  { contentType: "blog", postTypeRestBase: "blogs" },
+  { contentType: "leadership_interview", postTypeRestBase: "leadership-interview" },
+  { contentType: "case_study", postTypeRestBase: "casestudy" },
+  { contentType: "news", postTypeRestBase: "ibsi_news" }
+];
 
 const homeFeaturedTaxonomyRestBase = "editor_s_picks";
 /**
@@ -395,9 +410,15 @@ async function taxonomyTermId(taxonomyRestBase: string, slug: string): Promise<n
 }
 
 /**
- * Builds one card per configured source. Today there is only News; later the
- * other Home carousel sources can be added to the array without changing the
- * endpoint or the app payload.
+ * Builds one card per configured source, skipping a source that has no post
+ * carrying the term.
+ *
+ * The guard on the term matters. WordPress ignores a taxonomy filter on a
+ * post type the taxonomy is not registered for, and answers with that type's
+ * newest post as if no filter had been asked. Without the check, attaching
+ * the taxonomy to news alone would put an arbitrary latest blog, interview
+ * and case study in the carousel as "featured". So the term ids are asked
+ * for on the post and the card is only built when the term is really there.
  */
 async function listHomeFeaturedSources(
   sources: HomeFeaturedSource[],
@@ -412,11 +433,13 @@ async function listHomeFeaturedSources(
   // and this is cached so only a cold request pays for the source lookups.
   for (const source of sources) {
     const { posts } = await fetchPostType(source.postTypeRestBase, 1, 1, {
-      fields: newsListFields,
+      fields: `${newsListFields},${taxonomyRestBase}`,
       params: { [taxonomyRestBase]: String(termId) }
     });
     const post = posts[0];
     if (!post) continue;
+    const terms = (post as Record<string, unknown>)[taxonomyRestBase];
+    if (!Array.isArray(terms) || !terms.includes(termId)) continue;
     results.push({
       content_id: String(post.id),
       content_type: source.contentType,
@@ -430,18 +453,17 @@ async function listHomeFeaturedSources(
   return results;
 }
 
-/** The first Home feature: at most one editor-selected News article. */
+/**
+ * The editor-selected WordPress cards for the Home carousel, at most one per
+ * source in `homeFeaturedSources`. The route appends the Journal card.
+ */
 export async function listHomeFeatured(): Promise<HomeFeaturedItem[]> {
   // Include the editorial selector in the key. A warm Azure worker may retain
   // its in-memory cache across a package swap, and reusing a generic key here
   // kept the empty result from the former `featured-news` lookup alive after
-  // editors confirmed the real term was `fintech-focus`.
-  return cached(`home:featured:v1:${homeFeaturedTermSlug}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, () =>
-    listHomeFeaturedSources(
-      [{ contentType: "news", postTypeRestBase: "ibsi_news" }],
-      homeFeaturedTaxonomyRestBase,
-      homeFeaturedTermSlug
-    )
+  // editors confirmed the real term was `fintech-focus`. v2: four sources.
+  return cached(`home:featured:v2:${homeFeaturedTermSlug}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, () =>
+    listHomeFeaturedSources(homeFeaturedSources, homeFeaturedTaxonomyRestBase, homeFeaturedTermSlug)
   );
 }
 
