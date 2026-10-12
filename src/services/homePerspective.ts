@@ -1,4 +1,5 @@
 import { query } from "../db/pool.js";
+import { newsSlugFromLink, resolveNewsArticleIdFromLink } from "./wordpress.js";
 
 export type HomePerspective = {
   article_id: string | null;
@@ -37,11 +38,19 @@ export async function getHomePerspective(): Promise<HomePerspective | null> {
 
   if (!row) return null;
 
+  const articleId =
+    row.article_id ?? (await resolveNewsArticleIdFromLink(row.link).catch(() => null)) ?? fallbackArticleId(row.link);
+
   return {
-    article_id: row.article_id,
+    article_id: articleId,
     image_url: row.image_url,
     link: row.link,
     title: row.title,
     updated_at: row.updated_at.toISOString()
   };
+}
+
+function fallbackArticleId(link: string): string | null {
+  const slug = newsSlugFromLink(link);
+  return slug ? `slug:${slug}` : null;
 }

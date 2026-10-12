@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS home_perspective (
 INSERT INTO home_perspective (id, article_id, title, image_url, link, is_active)
 VALUES (
   1,
-  NULL,
+  'slug:banks-recalibrate-as-resilience-becomes-the-new-technology-mandate-2',
   'Banks recalibrate as resilience becomes the new technology mandate',
   'https://ibsintelligence.com/wp-content/uploads/2026/03/IBSi-West-Asia-Crisis-1x1-MPU-1-1536x1536.png',
   'https://ibsintelligence.com/banks-recalibrate-as-resilience-becomes-the-new-technology-mandate-2/',

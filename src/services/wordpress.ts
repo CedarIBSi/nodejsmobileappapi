@@ -655,21 +655,63 @@ function wordPressArticleId(articleId: string): string {
   return articleId.replace(/^postid-/i, "");
 }
 
+function newsSlugFromArticleId(articleId: string): string | null {
+  return articleId.startsWith("slug:") ? articleId.slice("slug:".length).trim() || null : null;
+}
+
+export function newsSlugFromLink(link: string): string | null {
+  try {
+    const parsed = new URL(link);
+    const slug = parsed.pathname.split("/").filter(Boolean).at(-1);
+    return slug ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function getNewsPostByArticleId(articleId: string, fields: string): Promise<WordPressPost | null> {
+  const slug = newsSlugFromArticleId(articleId);
+
+  if (slug) {
+    const url = new URL("/wp-json/wp/v2/ibsi_news", config().WORDPRESS_BASE_URL);
+    url.searchParams.set("slug", slug);
+    url.searchParams.set("_embed", "wp:featuredmedia");
+    url.searchParams.set("_fields", fields);
+
+    const response = await wordPressRequest(url, "application/json");
+    const posts = (await response.json()) as WordPressPost[];
+    return Array.isArray(posts) ? posts[0] ?? null : null;
+  }
+
+  const url = new URL(
+    `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
+    config().WORDPRESS_BASE_URL
+  );
+  url.searchParams.set("_embed", "wp:featuredmedia");
+  url.searchParams.set("_fields", fields);
+
+  const response = await wordPressRequest(url, "application/json");
+  return (await response.json()) as WordPressPost;
+}
+
+export async function resolveNewsArticleIdFromLink(link: string): Promise<string | null> {
+  const slug = newsSlugFromLink(link);
+  if (!slug) return null;
+
+  return cached(`news:article-id-by-slug:${slug}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const post = await getNewsPostByArticleId(`slug:${slug}`, "id");
+    return post?.id ? String(post.id) : null;
+  });
+}
+
 /** Resolves notification copy and artwork from the canonical WordPress post. */
 export async function getArticleMetadata(articleId: string): Promise<ArticleMetadata | null> {
   return cached(
     `news:article-metadata:${articleId}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
-      const url = new URL(
-        `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
-        config().WORDPRESS_BASE_URL
-      );
-      url.searchParams.set("_embed", "wp:featuredmedia");
-      url.searchParams.set("_fields", "id,title,_links,_embedded");
-
-      const response = await wordPressRequest(url, "application/json");
-      const post = (await response.json()) as WordPressPost;
+      const post = await getNewsPostByArticleId(articleId, "id,title,_links,_embedded");
+      if (!post) return null;
       const headline = toText(post.title?.rendered);
       return headline ? { headline, image_url: featuredImage(post) } : null;
     }
@@ -688,14 +730,8 @@ export async function getArticleContent(articleId: string): Promise<ArticleConte
     `news:article:v2:${articleId}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
-      const url = new URL(
-        `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
-        config().WORDPRESS_BASE_URL
-      );
-      url.searchParams.set("_fields", "id,content");
-
-      const response = await wordPressRequest(url, "application/json");
-      const post = (await response.json()) as WordPressPost;
+      const post = await getNewsPostByArticleId(articleId, "id,content");
+      if (!post) return null;
       const html = post.content?.rendered ?? null;
       const text = htmlToPlainText(post.content?.rendered) || null;
 
