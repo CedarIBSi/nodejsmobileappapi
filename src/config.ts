@@ -147,6 +147,11 @@ const schema = z.object({
   // deployment is being configured. Journal link creation fails closed.
   JOURNAL_SIGNING_SECRET: z.string().min(32).optional(),
   JOURNAL_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(3600),
+  // How many pages of an issue a reader without a subscription may open as a
+  // preview: the cover, the contents and the opening spread. Google Play's
+  // News policy requires a preview of subscription content before purchase.
+  // 0 turns previews off and the app hides the button.
+  JOURNAL_PREVIEW_PAGES: z.coerce.number().int().min(0).max(20).default(6),
   // One flat directory for every white paper, whatever its category - the
   // website splits them into per-category folders, but nothing here needs to,
   // and a flat root keeps `category` away from the filesystem entirely.

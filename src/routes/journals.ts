@@ -11,6 +11,7 @@ import { HttpError } from "../lib/errors.js";
 import { journalLockReason } from "../lib/journal-archive.js";
 import { journalImageUrl } from "../lib/journal-image.js";
 import { listLatestJournals } from "../services/journalLatest.js";
+import { journalPreviewFile, journalPreviewPageCount } from "../services/journalPreview.js";
 import { createJournalToken, verifyJournalToken } from "../lib/journal-token.js";
 import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute } from "../middleware/auth.js";
@@ -252,9 +253,42 @@ journalRouter.post("/:journal_id/view-link", ...privateRoute, validate(journalPa
   });
 }));
 
+/**
+ * Public: a link to the opening pages of one issue, for a reader who has
+ * not subscribed - Google Play's News policy requires subscription content
+ * to be previewable before purchase, and Apple's reviewers expect the same.
+ * No account is needed: the app shows the button on the gated Journal
+ * screen, where the reader may well be signed out.
+ *
+ * The link is signed with `preview` in its payload, and the view route
+ * below serves a file that only ever contained the preview pages; the full
+ * issue is never on the wire for this link. The same token TTL applies.
+ */
+journalRouter.post("/:journal_id/preview-link", validate(journalParams, "params"), asyncHandler(async (req, res) => {
+  const pages = journalPreviewPageCount();
+  if (pages === 0) {
+    throw new HttpError(404, "Journal previews are not available", "JOURNAL_PREVIEW_UNAVAILABLE");
+  }
+  const journalId = req.params.journal_id as string;
+  const result = await query<{ journal_id: string }>(
+    "SELECT journal_id FROM pv_ibsi_journal_data WHERE journal_id = $1 AND redirect_page IS NOT NULL AND btrim(redirect_page) <> ''",
+    [journalId]
+  );
+  if (!result.rows[0]) throw new HttpError(404, "Journal not found", "JOURNAL_NOT_FOUND");
+
+  const { token, expiresAt } = createJournalToken(journalId, req.appUser?.id ?? "preview", { preview: true });
+  res.set("Cache-Control", "no-store");
+  res.json({
+    expires_at: expiresAt.toISOString(),
+    expires_in_seconds: config().JOURNAL_URL_TTL_SECONDS,
+    pages,
+    view_url: new URL(`/v1/journals/view/${token}`, config().APP_BASE_URL).toString()
+  });
+}));
+
 journalRouter.get("/view/:token", validate(viewParams, "params"), asyncHandler(async (req, res) => {
   const { token } = req.params as { token: string };
-  const { journal_id: journalId } = verifyJournalToken(token);
+  const { journal_id: journalId, preview } = verifyJournalToken(token);
   const result = await query<{ redirect_page: string }>(
     "SELECT redirect_page FROM pv_ibsi_journal_data WHERE journal_id = $1",
     [journalId]
@@ -265,26 +299,39 @@ journalRouter.get("/view/:token", validate(viewParams, "params"), asyncHandler(a
     throw new HttpError(500, "Invalid journal file configuration", "INVALID_JOURNAL_FILE");
   }
 
-  const filePath = path.resolve(config().JOURNAL_STORAGE_DIR, filename);
+  const sourcePath = path.resolve(config().JOURNAL_STORAGE_DIR, filename);
   const storageRoot = path.resolve(config().JOURNAL_STORAGE_DIR);
-  if (path.dirname(filePath).toLowerCase() !== storageRoot.toLowerCase()) {
+  if (path.dirname(sourcePath).toLowerCase() !== storageRoot.toLowerCase()) {
     throw new HttpError(500, "Invalid journal file configuration", "INVALID_JOURNAL_FILE");
   }
-  let stat: fs.Stats;
+  let sourceStat: fs.Stats;
   try {
-    stat = await fs.promises.stat(filePath);
+    sourceStat = await fs.promises.stat(sourcePath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new HttpError(404, "Journal PDF is not available", "JOURNAL_FILE_NOT_FOUND");
     }
     throw error;
   }
-  if (!stat.isFile()) throw new HttpError(404, "Journal PDF is not available", "JOURNAL_FILE_NOT_FOUND");
+  if (!sourceStat.isFile()) throw new HttpError(404, "Journal PDF is not available", "JOURNAL_FILE_NOT_FOUND");
+
+  // A preview token, and only a preview token, is answered from the file of
+  // opening pages. A link minted after previews were switched off still
+  // works until it expires: the pages it was promised are what it gets.
+  let filePath = sourcePath;
+  let stat = sourceStat;
+  let servedName = filename;
+  if (preview) {
+    const pages = Math.max(1, journalPreviewPageCount());
+    filePath = await journalPreviewFile(journalId, sourcePath, pages);
+    stat = await fs.promises.stat(filePath);
+    servedName = `preview-${filename}`;
+  }
 
   res.set({
     "Accept-Ranges": "bytes",
     "Cache-Control": "private, no-store",
-    "Content-Disposition": `inline; filename="${filename.replace(/["\\\r\n]/g, "_")}"`,
+    "Content-Disposition": `inline; filename="${servedName.replace(/["\\\r\n]/g, "_")}"`,
     "Content-Type": "application/pdf"
   });
   const range = req.header("range");

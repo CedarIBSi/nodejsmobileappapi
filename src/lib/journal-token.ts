@@ -6,6 +6,13 @@ type JournalTokenPayload = {
   journal_id: string;
   user_id: string;
   expires_at: number;
+  /**
+   * Set on a link minted for the free preview. The view route serves the
+   * opening pages for such a link and the whole issue for any other, so the
+   * flag is signed into the token rather than read off the request - a
+   * preview link cannot be edited into a full one.
+   */
+  preview?: true;
 };
 
 function signature(payload: string): string {
@@ -18,7 +25,11 @@ function signature(payload: string): string {
     .digest("base64url");
 }
 
-export function createJournalToken(journalId: string, userId: string): {
+export function createJournalToken(
+  journalId: string,
+  userId: string,
+  options: { preview?: boolean } = {}
+): {
   token: string;
   expiresAt: Date;
 } {
@@ -26,7 +37,8 @@ export function createJournalToken(journalId: string, userId: string): {
   const payload = Buffer.from(JSON.stringify({
     journal_id: journalId,
     user_id: userId,
-    expires_at: Math.floor(expiresAt.getTime() / 1000)
+    expires_at: Math.floor(expiresAt.getTime() / 1000),
+    ...(options.preview ? { preview: true } : {})
   } satisfies JournalTokenPayload)).toString("base64url");
   return { token: `${payload}.${signature(payload)}`, expiresAt };
 }
@@ -53,7 +65,8 @@ export function verifyJournalToken(token: string): JournalTokenPayload {
   const value = decoded as Partial<JournalTokenPayload>;
   if (typeof value.journal_id !== "string" || !/^[1-9]\d*$/.test(value.journal_id) ||
       typeof value.user_id !== "string" ||
-      !Number.isSafeInteger(value.expires_at)) {
+      !Number.isSafeInteger(value.expires_at) ||
+      (value.preview !== undefined && value.preview !== true)) {
     throw new HttpError(403, "Invalid journal viewing link", "INVALID_JOURNAL_LINK");
   }
   if (value.expires_at! <= Math.floor(Date.now() / 1000)) {
