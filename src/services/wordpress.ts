@@ -69,7 +69,13 @@ type EmbeddedAuthor = { name?: string };
 
 type WordPressPost = {
   _embedded?: { author?: EmbeddedAuthor[]; "wp:featuredmedia"?: EmbeddedMedia[] };
+  /** ACF fields, when the field group is exposed to the REST API. */
+  acf?: Record<string, unknown>;
   content?: { rendered?: string };
+  /** The same field, when registered as a top-level REST field. */
+  image_for_mobile_app?: unknown;
+  /** Post meta registered with show_in_rest. */
+  meta?: Record<string, unknown>;
   date_gmt?: string;
   excerpt?: { rendered?: string };
   id: number;
@@ -147,6 +153,63 @@ function featuredImage(post: WordPressPost): string | null {
 function authorName(post: WordPressPost): string | null {
   const name = post._embedded?.author?.[0]?.name;
   return typeof name === "string" && name.trim() ? toText(name) : null;
+}
+
+/**
+ * The image the editors upload for the app, "image_for_mobile_app" in
+ * WordPress, as distinct from the featured image the website uses. Home's
+ * Featured Intelligence card shows it; everything else keeps the featured
+ * image.
+ *
+ * WordPress can expose a custom image field three ways, and which one the
+ * site uses could not be checked from the development machine (Cloudflare
+ * challenges every request that is not the API server's). So all three are
+ * read, in order: a top-level REST field, an ACF field under `acf`, and
+ * post meta under `meta`. Each may hold a URL, an ACF image object, or an
+ * attachment id; an id costs one media lookup, cached like everything else.
+ * Nothing found means null, and the app falls back to the featured image.
+ */
+const mobileImageField = "image_for_mobile_app";
+
+function mobileImageCandidate(post: WordPressPost): string | number | null {
+  const sources = [post.image_for_mobile_app, post.acf?.[mobileImageField], post.meta?.[mobileImageField]];
+  for (const raw of sources) {
+    if (raw === undefined || raw === null || raw === "" || raw === false) continue;
+    if (typeof raw === "number" && Number.isInteger(raw) && raw > 0) return raw;
+    if (typeof raw === "string") {
+      const value = raw.trim();
+      if (/^https?:\/\//i.test(value)) return value;
+      if (/^\d+$/.test(value)) return Number(value);
+      continue;
+    }
+    if (typeof raw === "object") {
+      const image = raw as { url?: unknown; source_url?: unknown; sizes?: Record<string, unknown>; id?: unknown; ID?: unknown };
+      const sized = image.sizes?.medium_large ?? image.sizes?.large;
+      for (const candidate of [sized, image.url, image.source_url]) {
+        if (typeof candidate === "string" && /^https?:\/\//i.test(candidate)) return candidate;
+      }
+      const id = image.id ?? image.ID;
+      if (typeof id === "number" && Number.isInteger(id) && id > 0) return id;
+    }
+  }
+  return null;
+}
+
+async function mediaUrlById(id: number): Promise<string | null> {
+  return cached(`wordpress:media:${id}`, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
+    const url = new URL(`/wp-json/wp/v2/media/${id}`, config().WORDPRESS_BASE_URL);
+    url.searchParams.set("_fields", "source_url,media_details");
+    const response = await wordPressRequest(url, "application/json");
+    const media = (await response.json()) as EmbeddedMedia;
+    const sizes = media.media_details?.sizes;
+    return sizes?.medium_large?.source_url ?? sizes?.large?.source_url ?? media.source_url ?? null;
+  }).catch(() => null);
+}
+
+async function mobileImage(post: WordPressPost): Promise<string | null> {
+  const candidate = mobileImageCandidate(post);
+  if (candidate === null) return null;
+  return typeof candidate === "number" ? mediaUrlById(candidate) : candidate;
 }
 
 type CacheEntry<T> = { expiresAt: number; value: T };
@@ -351,6 +414,8 @@ export type NewsItem = {
   excerpt: string | null;
   id: number;
   image_url: string | null;
+  /** The editors' app image (image_for_mobile_app); null when none is set. */
+  mobile_image_url: string | null;
   link: string;
   published_at: string | null;
   title: string;
@@ -405,7 +470,9 @@ const homeFeaturedTermSlug = "fintech-focus";
  * The feed omits article bodies: including them nearly doubles the page to
  * carry text the list never renders. Bodies are served by getArticleBody.
  */
-const newsListFields = "id,date_gmt,link,title,excerpt,_links,_embedded";
+// `acf`, `meta` and the bare field name: see mobileImageCandidate. Asking
+// for a field the site does not expose costs nothing - WordPress omits it.
+const newsListFields = "id,date_gmt,link,title,excerpt,_links,_embedded,acf,meta,image_for_mobile_app";
 
 async function taxonomyTermId(taxonomyRestBase: string, slug: string): Promise<number | null> {
   return cached(
@@ -511,15 +578,21 @@ export async function listNews(
       params
     });
 
-    const items = posts.map((post) => ({
-      author_name: authorName(post),
-      excerpt: excerptText(post.excerpt?.rendered) || null,
-      id: post.id,
-      image_url: featuredImage(post),
-      link: post.link ?? "",
-      published_at: toIsoTimestamp(post.date_gmt),
-      title: toText(post.title?.rendered)
-    }));
+    // One at a time, not Promise.all: a mobile image held as an attachment
+    // id costs a media lookup, and a burst of those is what Cloudflare drops.
+    const items: NewsItem[] = [];
+    for (const post of posts) {
+      items.push({
+        author_name: authorName(post),
+        excerpt: excerptText(post.excerpt?.rendered) || null,
+        id: post.id,
+        image_url: featuredImage(post),
+        link: post.link ?? "",
+        mobile_image_url: await mobileImage(post),
+        published_at: toIsoTimestamp(post.date_gmt),
+        title: toText(post.title?.rendered)
+      });
+    }
 
     return { items, total };
   });
@@ -553,15 +626,21 @@ export async function searchNews(
       params
     });
 
-    const items = posts.map((post) => ({
-      author_name: authorName(post),
-      excerpt: excerptText(post.excerpt?.rendered) || null,
-      id: post.id,
-      image_url: featuredImage(post),
-      link: post.link ?? "",
-      published_at: toIsoTimestamp(post.date_gmt),
-      title: toText(post.title?.rendered)
-    }));
+    // One at a time, not Promise.all: a mobile image held as an attachment
+    // id costs a media lookup, and a burst of those is what Cloudflare drops.
+    const items: NewsItem[] = [];
+    for (const post of posts) {
+      items.push({
+        author_name: authorName(post),
+        excerpt: excerptText(post.excerpt?.rendered) || null,
+        id: post.id,
+        image_url: featuredImage(post),
+        link: post.link ?? "",
+        mobile_image_url: await mobileImage(post),
+        published_at: toIsoTimestamp(post.date_gmt),
+        title: toText(post.title?.rendered)
+      });
+    }
 
     return { items, total };
   });
