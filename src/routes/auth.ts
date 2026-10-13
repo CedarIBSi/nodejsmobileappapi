@@ -8,10 +8,6 @@ import { HttpError } from "../lib/errors.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import {
-  billableAfterPeriodEndStatuses,
-  nonBillableStoreStatuses
-} from "../lib/subscriptionReconcile.js";
 import { firebaseAuth } from "../services/firebase.js";
 import { verifyMicrosoftIdToken } from "../services/microsoftIdentity.js";
 import { config } from "../config.js";
@@ -346,48 +342,20 @@ authRouter.delete("/me", verifyFirebaseToken, validate(deleteAccountSchema), asy
   const appUserId = existing.rows[0]?.id ?? null;
 
   /**
-   * Asked as "can the store still charge for this" rather than "is the status
-   * one of these".
+   * A subscription the store can still bill does not stop the delete.
    *
-   * The old list named the billing states directly and had drifted: it still
-   * carried the Razorpay statuses migration 012 removed, while missing every
-   * state the stores actually bill in except 'active' - Google's
-   * 'in_grace_period' and 'on_hold', Apple's 'billing_grace_period' and
-   * 'billing_retry'. Anyone in those could delete their account and go on being
-   * charged for a subscription they no longer had any account to cancel from.
+   * It used to: a 409 ACTIVE_SUBSCRIPTION sent the reader to the store to
+   * cancel first. Both stores reject that. Apple's account-deletion rule
+   * (5.1.1(v)) and Play's require the delete to go through on request, with
+   * the app allowed to tell the reader that a store-billed subscription
+   * carries on until they cancel it in the store - which the app now does,
+   * in the confirmation dialog, with a route to the store beside Delete.
    *
-   * Inverting it makes the failure safe: the non-billable states are a small,
-   * stable set, and anything unrecognised falls outside it and blocks.
-   *
-   * The test is whether the store can still charge, not whether access is still
-   * running. Those differ at 'canceled', which grants access to the end of the
-   * paid period but will never bill again - so it must not block, or cancelling
-   * as instructed leaves the reader refused a second time with nothing left to
-   * try.
-   *
-   * Status alone is not enough, because a row's status is only as fresh as the
-   * last webhook that mentioned it and nothing re-asks about older rows. An
-   * expiry already in the past means the store has finished with that purchase
-   * whatever the row still says, so those are ignored - except for the statuses
-   * that legitimately outlive their period (see
-   * billableAfterPeriodEndStatuses). Without that clause a tester with a few
-   * abandoned purchases frozen at 'active' can never delete their account, and
-   * there is nothing they can do about it: the screen tells them they have no
-   * subscription while the guard keeps finding one.
+   * Billing after the delete is the store's, not ours: a renewal webhook for
+   * a subscription with no row left is recorded in store_events and nothing
+   * else happens. The reader cancels in the store's own subscription centre,
+   * which never needed an IBSi account.
    */
-  if (appUserId) {
-    const billable = await query(
-      `SELECT 1 FROM subscriptions
-        WHERE user_id = $1
-          AND status <> ALL($2::text[])
-          AND (current_end IS NULL OR current_end > now() OR status = ANY($3::text[]))
-        LIMIT 1`,
-      [appUserId, nonBillableStoreStatuses, billableAfterPeriodEndStatuses]
-    );
-    if (billable.rowCount) {
-      throw new HttpError(409, "Cancel the active subscription before deleting the account", "ACTIVE_SUBSCRIPTION");
-    }
-  }
 
   /**
    * Order matters, and this is the safe one. The row goes first, the Firebase
