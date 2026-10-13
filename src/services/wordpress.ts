@@ -66,9 +66,15 @@ type EmbeddedMedia = {
 };
 
 type EmbeddedAuthor = { name?: string };
+type EmbeddedTerm = { id?: number; name?: string; taxonomy?: string };
 
 type WordPressPost = {
-  _embedded?: { author?: EmbeddedAuthor[]; "wp:featuredmedia"?: EmbeddedMedia[] };
+  _embedded?: {
+    author?: EmbeddedAuthor[];
+    "wp:featuredmedia"?: EmbeddedMedia[];
+    /** One array per taxonomy the post has terms in: categories, then tags. */
+    "wp:term"?: EmbeddedTerm[][];
+  };
   /** ACF fields, when the field group is exposed to the REST API. */
   acf?: Record<string, unknown>;
   content?: { rendered?: string };
@@ -153,6 +159,23 @@ function featuredImage(post: WordPressPost): string | null {
 function authorName(post: WordPressPost): string | null {
   const name = post._embedded?.author?.[0]?.name;
   return typeof name === "string" && name.trim() ? toText(name) : null;
+}
+
+/**
+ * The story's category, from the terms WordPress embeds with the post. A
+ * story usually carries a catch-all ("News", "Uncategorized") beside the
+ * one that says something ("Payments"); the first that says something
+ * wins, and the catch-all only when it is all there is.
+ */
+const genericCategories = new Set(["news", "uncategorized", "uncategorised", "ibsi news"]);
+
+function categoryName(post: WordPressPost): string | null {
+  const categories = (post._embedded?.["wp:term"] ?? [])
+    .flat()
+    .filter((term) => term.taxonomy === "category" && typeof term.name === "string" && term.name.trim())
+    .map((term) => toText(term.name as string));
+  if (!categories.length) return null;
+  return categories.find((name) => !genericCategories.has(name.toLowerCase())) ?? categories[0] ?? null;
 }
 
 /**
@@ -326,7 +349,7 @@ async function fetchPostType(
   const url = new URL(`/wp-json/wp/v2/${restBase}`, config().WORDPRESS_BASE_URL);
   url.searchParams.set("page", String(page));
   url.searchParams.set("per_page", String(limit));
-  url.searchParams.set("_embed", "wp:featuredmedia,author");
+  url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
   url.searchParams.set("_fields", options.fields ?? listFields);
 
   for (const [key, value] of Object.entries(options.params ?? {})) {
@@ -411,6 +434,8 @@ function videoDescription(post: WordPressPost): string | null {
 export type NewsItem = {
   /** The byline; null when WordPress has none for the post. */
   author_name: string | null;
+  /** The story's category ("Payments"); null when the post has none. */
+  category_name: string | null;
   excerpt: string | null;
   id: number;
   image_url: string | null;
@@ -584,6 +609,7 @@ export async function listNews(
     for (const post of posts) {
       items.push({
         author_name: authorName(post),
+        category_name: categoryName(post),
         excerpt: excerptText(post.excerpt?.rendered) || null,
         id: post.id,
         image_url: featuredImage(post),
@@ -632,6 +658,7 @@ export async function searchNews(
     for (const post of posts) {
       items.push({
         author_name: authorName(post),
+        category_name: categoryName(post),
         excerpt: excerptText(post.excerpt?.rendered) || null,
         id: post.id,
         image_url: featuredImage(post),
@@ -771,7 +798,7 @@ async function getNewsPostByArticleId(articleId: string, fields: string): Promis
   if (slug) {
     const url = new URL("/wp-json/wp/v2/ibsi_news", config().WORDPRESS_BASE_URL);
     url.searchParams.set("slug", slug);
-    url.searchParams.set("_embed", "wp:featuredmedia,author");
+    url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
     url.searchParams.set("_fields", fields);
 
     const response = await wordPressRequest(url, "application/json");
@@ -783,7 +810,7 @@ async function getNewsPostByArticleId(articleId: string, fields: string): Promis
     `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
     config().WORDPRESS_BASE_URL
   );
-  url.searchParams.set("_embed", "wp:featuredmedia,author");
+  url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
   url.searchParams.set("_fields", fields);
 
   const response = await wordPressRequest(url, "application/json");
@@ -903,7 +930,7 @@ async function fetchPost(restBase: string, postId: string): Promise<WordPressPos
     `/wp-json/wp/v2/${restBase}/${encodeURIComponent(postId)}`,
     config().WORDPRESS_BASE_URL
   );
-  url.searchParams.set("_embed", "wp:featuredmedia,author");
+  url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
   url.searchParams.set("_fields", listFields);
 
   try {
@@ -1061,7 +1088,7 @@ async function getEditorialPost(
         `/wp-json/wp/v2/${type.restBase}/${encodeURIComponent(wordpressId)}`,
         config().WORDPRESS_BASE_URL
       );
-      url.searchParams.set("_embed", "wp:featuredmedia,author");
+      url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
       url.searchParams.set(
         "_fields",
         "id,date_gmt,link,title,excerpt,content,_links,_embedded"
