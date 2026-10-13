@@ -23,6 +23,7 @@ import { adsRouter } from "./routes/ads.js";
 import { homePromoRouter } from "./routes/home-promo.js";
 import { homeRouter } from "./routes/home.js";
 import { appRouter } from "./routes/app.js";
+import { adminEventsRouter } from "./routes/admin-events.js";
 import { adminSubscriberRouter } from "./routes/admin-subscribers.js";
 import { journalRouter } from "./routes/journals.js";
 import { whitepaperRouter } from "./routes/whitepapers.js";
@@ -178,6 +179,7 @@ export function createApp() {
   // The app asking about itself: update gate, service notice, measurement.
   app.use("/v1/app", appRouter);
   app.use("/v1/admin/subscribers", adminSubscriberRouter);
+  app.use("/v1/admin/events", adminEventsRouter);
   app.use("/v1/journals", journalRouter);
   app.use("/v1/whitepapers", whitepaperRouter);
   app.use("/v1/podcasts", podcastRouter);

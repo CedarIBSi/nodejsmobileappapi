@@ -1,5 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
 import { getAuth, GoogleAuthProvider, OAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { setupEvents } from "./events.js";
 
 const $ = (id) => document.getElementById(id);
 const config = window.__FIREBASE_CONFIG__ || {};
@@ -424,19 +425,24 @@ for (const button of document.querySelectorAll(".help-button")) button.addEventL
 document.addEventListener("click", () => closeHelp());
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeHelp(); });
 
+// The Events section lives in events.js and borrows the helpers above.
+const events = setupEvents({ $, adminApi, escapeHtml });
+
 const tabTitles = {
   news: ["Notifications", "News notifications"],
   message: ["Notifications", "Compose message"],
   history: ["Notifications", "Notification history"],
   subscribers: ["Subscribers", "Subscriber operations"],
   "app-status": ["App management", "Status & notices"],
-  numbers: ["App management", "Usage numbers"]
+  numbers: ["App management", "Usage numbers"],
+  events: ["Events", "Summits & awards"],
+  "events-page": ["Events", "Page content"]
 };
 
 function switchTab(button) {
   const tab = button.dataset.tab;
   document.querySelectorAll(".subnav button[data-tab]").forEach((item) => item.classList.toggle("active", item === button));
-  for (const name of ["news", "message", "history", "subscribers", "app-status", "numbers"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
+  for (const name of ["news", "message", "history", "subscribers", "app-status", "numbers", "events", "events-page"]) $(`${name}-panel`).hidden = name !== button.dataset.tab;
   $("preview-panel").hidden = !["news", "message"].includes(tab);
   const section = button.closest(".nav-group");
   document.querySelectorAll(".nav-group").forEach((group) => {
@@ -452,6 +458,8 @@ function switchTab(button) {
   if (tab === "subscribers") void loadSubscriberWorkspace();
   if (tab === "app-status") void loadAppStatus();
   if (tab === "numbers") void loadNumbers();
+  if (tab === "events") void events.loadEvents();
+  if (tab === "events-page") void events.loadEventsPage();
 }
 
 for (const button of document.querySelectorAll(".subnav button[data-tab]")) button.addEventListener("click", () => switchTab(button));

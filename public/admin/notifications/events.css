@@ -1,0 +1,27 @@
+/* Events section of the admin console: the summits list, the event form and
+   the page-content editors. Everything else comes from admin-shell.css. */
+.events-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.events-table td,.events-table th{vertical-align:middle}
+.events-table .row-actions{text-align:right;white-space:nowrap}
+.events-table button{padding:6px 10px;font-size:13px}
+.pill{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700}
+.pill-upcoming{background:#dff3e6;color:#1b6b3a}
+.pill-past{background:#eef1f5;color:#5b6676}
+.pill-unpublished{background:#fde8e8;color:#9b2c2c}
+.pill-featured{background:#fff1d6;color:#8a5a00;margin-left:6px}
+.event-form{margin-top:18px}
+.event-form .form-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.event-form .actions{justify-content:flex-start}
+.event-form .danger{background:#fde8e8;color:#9b2c2c}
+.event-image-preview{max-width:320px;max-height:160px;border-radius:8px;border:1px solid #dfe6ef;object-fit:cover;display:block;margin-top:6px}
+.event-image-preview[hidden]{display:none}
+.repeater{display:grid;gap:10px;margin:10px 0}
+.repeater-row{display:grid;gap:8px;padding:12px;border:1px solid #e4e9f0;border-radius:9px;background:#fbfcfe}
+.repeater-row .repeater-fields{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.repeater-row label{display:flex;flex-direction:column;gap:4px;font-size:13px;margin:0}
+.repeater-row textarea{min-height:64px}
+.repeater-row .repeater-remove{justify-self:end;background:#eef1f5;color:#5b6676;padding:5px 10px;font-size:12px}
+.repeater-add{background:#e9f1f7;color:#005895}
+.subcard .save-row{display:flex;align-items:center;gap:12px;margin-top:12px}
+.subcard .save-row small{color:#5b6676}
+.section-note{color:#5b6676;font-size:13px;margin:4px 0 10px}

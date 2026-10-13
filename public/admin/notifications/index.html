@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/admin/notifications/styles.css">
   <link rel="stylesheet" href="/admin/notifications/help.css">
   <link rel="stylesheet" href="/admin/notifications/admin-shell.css">
+  <link rel="stylesheet" href="/admin/notifications/events.css">
 </head>
 <body>
   <section id="sign-in" class="auth-screen">
@@ -40,6 +41,13 @@
           <div class="subnav">
             <button type="button" data-tab="app-status">Status & notices</button>
             <button type="button" data-tab="numbers">Usage numbers</button>
+          </div>
+        </div>
+        <div class="nav-group" data-section="events">
+          <button type="button" class="nav-section" data-section-button="events"><span class="nav-icon">▣</span><span>Events</span><span class="chevron">⌄</span></button>
+          <div class="subnav">
+            <button type="button" data-tab="events">Summits & awards</button>
+            <button type="button" data-tab="events-page">Page content</button>
           </div>
         </div>
       </nav>
@@ -98,6 +106,44 @@
             </div><p id="app-status-result"></p>
           </section>
           <section class="card panel wide-panel" id="numbers-panel" hidden><div class="panel-heading"><div><h2>Usage numbers</h2><p class="muted">Daily product activity, installations, and signed-in readers.</p></div><select id="numbers-days" class="compact-select"><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select><button id="numbers-export" type="button" class="secondary">Export CSV</button></div><div id="numbers-table" class="table-wrap"><p>Choose this page to load the latest numbers.</p></div></section>
+          <section class="card panel wide-panel" id="events-panel" hidden>
+            <div class="panel-heading"><div><h2>Summits &amp; awards</h2><p id="events-meta" class="muted">What the app's Events screen lists. An event leaves the app the day after its date; unpublished events never show.</p></div><button id="event-new" type="button">New event</button></div>
+            <div id="events-table" class="table-wrap"><p>Loading…</p></div>
+            <form id="event-form" class="subcard event-form" hidden>
+              <span class="section-kicker">EVENT</span><h3 id="event-form-title">New event</h3>
+              <div class="form-grid">
+                <label for="ev-title">Title<input id="ev-title" maxlength="200" required placeholder="Building a Future-Ready Bank"></label>
+                <label for="ev-city">City<input id="ev-city" maxlength="120" placeholder="Dubai, UAE"></label>
+                <label for="ev-starts-on">Date<input id="ev-starts-on" type="date"><small>Orders the list and retires the event the day after.</small></label>
+                <label for="ev-date-label">Date as shown<input id="ev-date-label" maxlength="80" placeholder="28 October 2026"><small>Shown exactly as typed. Filled from the date if left blank.</small></label>
+                <label for="ev-venue">Venue<input id="ev-venue" maxlength="200" placeholder="Optional"></label>
+                <label for="ev-email">Registration email<input id="ev-email" type="email" placeholder="Optional; the app's events address otherwise"></label>
+              </div>
+              <label for="ev-summary">Summary<textarea id="ev-summary" maxlength="1000" rows="3" placeholder="One or two sentences under the title."></textarea></label>
+              <label for="ev-image">Banner image URL<input id="ev-image" type="url" placeholder="https://cedaribsi.events/images/banner/…"><img id="ev-image-preview" class="event-image-preview" alt="" hidden></label>
+              <div class="form-grid">
+                <label for="ev-id">Id<input id="ev-id" maxlength="120" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="Made from the year, city and title if left blank"><small>Lower-case, hyphens. Fixed once saved.</small></label>
+                <label for="ev-sort">Sort order<input id="ev-sort" type="number" value="0" min="-1000" max="1000"><small>Lower first among events on the same day.</small></label>
+              </div>
+              <label class="check-label" for="ev-featured"><input id="ev-featured" type="checkbox"> Featured (the one big card at the top; only one event can be)</label>
+              <label class="check-label" for="ev-published"><input id="ev-published" type="checkbox" checked> Published</label>
+              <div class="actions"><button type="submit" id="event-save">Save event</button><button type="button" id="event-cancel" class="secondary">Cancel</button><button type="button" id="event-delete" class="danger" hidden>Delete event</button></div>
+            </form>
+            <p id="events-result"></p>
+          </section>
+
+          <section class="card panel wide-panel" id="events-page-panel" hidden>
+            <div class="panel-heading"><div><h2>Page content</h2><p id="events-page-meta" class="muted">The copy around the events list. Each box saves on its own.</p></div></div>
+            <div class="admin-grid">
+              <form class="subcard" data-section="intro"><span class="section-kicker">TOP OF PAGE</span><h3>Introduction</h3><label for="pg-intro">Intro paragraphs<textarea id="pg-intro" maxlength="4000" rows="7"></textarea><small>Leave a blank line between paragraphs.</small></label><label for="pg-intro-points">Bullet points under the intro<textarea id="pg-intro-points" rows="5"></textarea><small>One per line.</small></label><div class="save-row"><button type="submit">Save introduction</button></div></form>
+              <form class="subcard" data-section="about"><span class="section-kicker">ABOUT</span><h3>About Cedar-IBSi</h3><label for="pg-about-heading">Heading<input id="pg-about-heading" maxlength="120"></label><label for="pg-about-body">Paragraphs<textarea id="pg-about-body" rows="6"></textarea><small>Leave a blank line between paragraphs.</small></label><label for="pg-about-points">Bullet points<textarea id="pg-about-points" rows="4"></textarea><small>One per line.</small></label><div class="save-row"><button type="submit">Save about</button></div></form>
+              <form class="subcard" data-section="stats"><span class="section-kicker">NUMBERS</span><h3>Stats</h3><p class="section-note">The figures strip: a label and a value each.</p><div id="rep-stats" class="repeater"></div><button type="button" class="repeater-add" data-add="stats">Add stat</button><div class="save-row"><button type="submit">Save stats</button></div></form>
+              <form class="subcard" data-section="series"><span class="section-kicker">PROGRAMME</span><h3>Series</h3><p class="section-note">The kinds of event Cedar-IBSi runs, in order.</p><div id="rep-series" class="repeater"></div><button type="button" class="repeater-add" data-add="series">Add series</button><div class="save-row"><button type="submit">Save series</button></div></form>
+              <form class="subcard" data-section="videos"><span class="section-kicker">RECORDINGS</span><h3>Videos</h3><p class="section-note">YouTube highlights. The id is the 11 characters after <strong>v=</strong> in the video's address.</p><div id="rep-videos" class="repeater"></div><button type="button" class="repeater-add" data-add="videos">Add video</button><div class="save-row"><button type="submit">Save videos</button></div></form>
+              <form class="subcard" data-section="insights"><span class="section-kicker">READING</span><h3>Insights</h3><p class="section-note">The summit insight cards.</p><div id="rep-insights" class="repeater"></div><button type="button" class="repeater-add" data-add="insights">Add insight</button><div class="save-row"><button type="submit">Save insights</button></div></form>
+            </div>
+            <p id="events-page-result"></p>
+          </section>
           <aside class="card preview" id="preview-panel"><span class="section-kicker">DEVICE PREVIEW</span><h2>Notification</h2><div class="phone"><div class="notification"><div class="app-icon">I</div><div><strong id="preview-title">IBS Intelligence</strong><p id="preview-body">Choose an article or write a message.</p><img id="preview-image" hidden></div></div></div><p id="status"></p></aside>
         </div>
       </main>

@@ -48,7 +48,20 @@ const defaultSeedPath = path.resolve(
  * Usage: npm run seed:events [-- <events.json>]
  */
 async function main() {
-  const [suppliedPath] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  // Since 2026-10-13 the events are edited in the admin console
+  // (/admin/notifications, Events section), which writes to the same tables.
+  // Reseeding from the file would silently overwrite those edits, so it now
+  // has to be asked for by name: `npm run seed:events -- --force [file]`.
+  if (!args.includes("--force")) {
+    console.error(
+      "Events are edited in the admin console now; seeding from the file would overwrite those edits.\n" +
+      "Run with --force if you really want the file to replace what is in the database."
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const [suppliedPath] = args.filter((arg) => arg !== "--force");
   const seedPath = suppliedPath ? path.resolve(suppliedPath) : defaultSeedPath;
   const seed = JSON.parse(await fs.readFile(seedPath, "utf8")) as SeedFile;
   const upcoming = seed.upcoming ?? [];
