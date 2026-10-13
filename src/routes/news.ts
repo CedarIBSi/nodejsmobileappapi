@@ -95,8 +95,15 @@ newsRouter.get(
     res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
     // `body` stays the flattened text every shipped build reads; `body_html`
     // is additive, for clients that can render the real markup.
+    // `author_name` is additive too: the byline, or null, which the app
+    // shows as the publication's name.
     res.json({
-      article: { body: content.text, body_html: content.html, id: articleId }
+      article: {
+        author_name: content.author_name,
+        body: content.text,
+        body_html: content.html,
+        id: articleId
+      }
     });
   })
 );

@@ -65,8 +65,10 @@ type EmbeddedMedia = {
   media_details?: { sizes?: Record<string, { source_url?: string } | undefined> };
 };
 
+type EmbeddedAuthor = { name?: string };
+
 type WordPressPost = {
-  _embedded?: { "wp:featuredmedia"?: EmbeddedMedia[] };
+  _embedded?: { author?: EmbeddedAuthor[]; "wp:featuredmedia"?: EmbeddedMedia[] };
   content?: { rendered?: string };
   date_gmt?: string;
   excerpt?: { rendered?: string };
@@ -134,6 +136,17 @@ function featuredImage(post: WordPressPost): string | null {
     media?.source_url ??
     null
   );
+}
+
+/**
+ * The byline, from the author WordPress embeds alongside the featured image.
+ * Null when the post type does not register an author, or the name is blank;
+ * the app then credits the publication. Google Play's News policy asks that
+ * every article show its author or source, which is why this travels at all.
+ */
+function authorName(post: WordPressPost): string | null {
+  const name = post._embedded?.author?.[0]?.name;
+  return typeof name === "string" && name.trim() ? toText(name) : null;
 }
 
 type CacheEntry<T> = { expiresAt: number; value: T };
@@ -250,7 +263,7 @@ async function fetchPostType(
   const url = new URL(`/wp-json/wp/v2/${restBase}`, config().WORDPRESS_BASE_URL);
   url.searchParams.set("page", String(page));
   url.searchParams.set("per_page", String(limit));
-  url.searchParams.set("_embed", "wp:featuredmedia");
+  url.searchParams.set("_embed", "wp:featuredmedia,author");
   url.searchParams.set("_fields", options.fields ?? listFields);
 
   for (const [key, value] of Object.entries(options.params ?? {})) {
@@ -333,6 +346,8 @@ function videoDescription(post: WordPressPost): string | null {
 }
 
 export type NewsItem = {
+  /** The byline; null when WordPress has none for the post. */
+  author_name: string | null;
   excerpt: string | null;
   id: number;
   image_url: string | null;
@@ -497,6 +512,7 @@ export async function listNews(
     });
 
     const items = posts.map((post) => ({
+      author_name: authorName(post),
       excerpt: excerptText(post.excerpt?.rendered) || null,
       id: post.id,
       image_url: featuredImage(post),
@@ -538,6 +554,7 @@ export async function searchNews(
     });
 
     const items = posts.map((post) => ({
+      author_name: authorName(post),
       excerpt: excerptText(post.excerpt?.rendered) || null,
       id: post.id,
       image_url: featuredImage(post),
@@ -641,7 +658,7 @@ export async function listNewsCategories(): Promise<NewsCategoryItem[]> {
 }
 
 /** One article's body, as plain text ready for the app to render. */
-export type ArticleContent = { html: string | null; text: string | null };
+export type ArticleContent = { author_name: string | null; html: string | null; text: string | null };
 export type ArticleMetadata = {
   headline: string;
   image_url: string | null;
@@ -675,7 +692,7 @@ async function getNewsPostByArticleId(articleId: string, fields: string): Promis
   if (slug) {
     const url = new URL("/wp-json/wp/v2/ibsi_news", config().WORDPRESS_BASE_URL);
     url.searchParams.set("slug", slug);
-    url.searchParams.set("_embed", "wp:featuredmedia");
+    url.searchParams.set("_embed", "wp:featuredmedia,author");
     url.searchParams.set("_fields", fields);
 
     const response = await wordPressRequest(url, "application/json");
@@ -687,7 +704,7 @@ async function getNewsPostByArticleId(articleId: string, fields: string): Promis
     `/wp-json/wp/v2/ibsi_news/${encodeURIComponent(wordPressArticleId(articleId))}`,
     config().WORDPRESS_BASE_URL
   );
-  url.searchParams.set("_embed", "wp:featuredmedia");
+  url.searchParams.set("_embed", "wp:featuredmedia,author");
   url.searchParams.set("_fields", fields);
 
   const response = await wordPressRequest(url, "application/json");
@@ -726,16 +743,17 @@ export async function getArticleMetadata(articleId: string): Promise<ArticleMeta
  * string.
  */
 export async function getArticleContent(articleId: string): Promise<ArticleContent | null> {
+  // v3: carries the byline, so a warm worker's v2 entries are not reused.
   return cached(
-    `news:article:v2:${articleId}`,
+    `news:article:v3:${articleId}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
-      const post = await getNewsPostByArticleId(articleId, "id,content");
+      const post = await getNewsPostByArticleId(articleId, "id,content,_links,_embedded");
       if (!post) return null;
       const html = post.content?.rendered ?? null;
       const text = htmlToPlainText(post.content?.rendered) || null;
 
-      return text || html ? { html, text } : null;
+      return text || html ? { author_name: authorName(post), html, text } : null;
     }
   );
 }
@@ -806,7 +824,7 @@ async function fetchPost(restBase: string, postId: string): Promise<WordPressPos
     `/wp-json/wp/v2/${restBase}/${encodeURIComponent(postId)}`,
     config().WORDPRESS_BASE_URL
   );
-  url.searchParams.set("_embed", "wp:featuredmedia");
+  url.searchParams.set("_embed", "wp:featuredmedia,author");
   url.searchParams.set("_fields", listFields);
 
   try {
@@ -964,7 +982,7 @@ async function getEditorialPost(
         `/wp-json/wp/v2/${type.restBase}/${encodeURIComponent(wordpressId)}`,
         config().WORDPRESS_BASE_URL
       );
-      url.searchParams.set("_embed", "wp:featuredmedia");
+      url.searchParams.set("_embed", "wp:featuredmedia,author");
       url.searchParams.set(
         "_fields",
         "id,date_gmt,link,title,excerpt,content,_links,_embedded"
