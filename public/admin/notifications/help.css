@@ -30,10 +30,10 @@
   height: 22px;
   min-width: 22px;
   padding: 0;
-  border: 1px solid #8ca4ba;
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
   background: #fff;
-  color: #005895;
+  color: var(--brand);
   font-size: 13px;
   font-weight: 800;
   line-height: 1;
@@ -41,18 +41,18 @@
 
 .help-button:hover,
 .help-button:focus-visible {
-  background: #e9f1f7;
-  outline: 2px solid #7db5da;
+  background: var(--brand-soft);
+  outline: 2px solid #8cc1d9;
   outline-offset: 2px;
 }
 
 .help-popover {
   position: relative;
   padding: 10px 12px;
-  border: 1px solid #b8cede;
+  border: 1px solid #bfd4df;
   border-radius: 8px;
-  background: #eef7fc;
-  color: #26394b;
+  background: #f1f8fb;
+  color: #2d4353;
   box-shadow: 0 5px 14px #16243b17;
   font-size: 13px;
   font-weight: 400;
@@ -65,10 +65,10 @@
 
 .error-state {
   padding: 12px;
-  border: 1px solid #f0b8b3;
+  border: 1px solid #efc1bd;
   border-radius: 8px;
-  background: #fff5f4;
-  color: #8f1d18;
+  background: #fff6f5;
+  color: var(--danger);
 }
 
 .error-state p {
@@ -79,33 +79,8 @@
   grid-column: 1 / -1;
 }
 
-.admin-grid,
-.form-grid {
-  display: grid;
-  gap: 16px;
-}
-
-.admin-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.form-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.subcard {
-  padding: 18px;
-  border: 1px solid #dfe6ef;
-  border-radius: 10px;
-  background: #fbfdff;
-}
-
-.subcard h3 {
-  margin-top: 0;
-}
-
 .muted {
-  color: #697386;
+  color: var(--muted);
   font-size: 14px;
 }
 
@@ -123,9 +98,9 @@
 .notice-preview {
   margin-top: 14px;
   padding: 12px 14px;
-  border-left: 4px solid #2383bd;
+  border-left: 3px solid var(--brand);
   border-radius: 7px;
-  background: #eaf6fd;
+  background: var(--brand-soft);
 }
 
 .notice-preview.warning {
@@ -155,13 +130,13 @@
 .data-table th,
 .data-table td {
   padding: 9px 10px;
-  border-bottom: 1px solid #dfe6ef;
+  border-bottom: 1px solid var(--line);
   text-align: left;
   white-space: nowrap;
 }
 
 .data-table th {
-  background: #eef4f8;
+  background: #f7f9fb;
 }
 
 @media (max-width: 800px) {
