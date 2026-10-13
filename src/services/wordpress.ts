@@ -589,7 +589,10 @@ export async function listNews(
 ): Promise<MediaPage<NewsItem>> {
   const months = config().NEWS_WINDOW_MONTHS;
   const region = findNewsRegion(regionSlug);
-  const key = `news:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
+  // v2 adds category_name to the cached response shape. Azure can keep a
+  // warm worker's in-memory cache across a package swap, so reusing the old
+  // key would serve category-less items until that entry expires.
+  const key = `news:v2:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
 
   return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
     const params: Record<string, string> = { after: contentWindowStart(months) };
@@ -640,7 +643,7 @@ export async function searchNews(
 ): Promise<MediaPage<NewsItem>> {
   const query = term.trim();
   const region = findNewsRegion(regionSlug);
-  const key = `news:search:${query.toLowerCase()}:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
+  const key = `news:search:v2:${query.toLowerCase()}:${page}:${limit}:${categoryId ?? "all"}:${region?.slug ?? "all"}`;
 
   return cached(key, config().MEDIA_CACHE_TTL_SECONDS * 1000, async () => {
     const params: Record<string, string> = { orderby: "relevance", search: query };
