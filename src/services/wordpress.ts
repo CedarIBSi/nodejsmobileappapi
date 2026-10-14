@@ -1083,7 +1083,8 @@ async function listEditorialPosts(
   categoryId?: number
 ): Promise<MediaPage<AnalystOpinionItem>> {
   return cached(
-    `${type.cachePrefix}s:${page}:${limit}:${categoryId ?? "all"}`,
+    // v2 adds author_name and author_role to the cached list shape.
+    `${type.cachePrefix}s:v2:${page}:${limit}:${categoryId ?? "all"}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
       const params: Record<string, string> = {};
@@ -1117,7 +1118,8 @@ async function getEditorialPost(
 ): Promise<AnalystOpinionDetail | null> {
   const wordpressId = postId.replace(/^postid-/i, "");
   return cached(
-    `${type.cachePrefix}:${wordpressId}`,
+    // v2 adds author_name and author_role to the cached detail shape.
+    `${type.cachePrefix}:v2:${wordpressId}`,
     config().MEDIA_CACHE_TTL_SECONDS * 1000,
     async () => {
       const url = new URL(
