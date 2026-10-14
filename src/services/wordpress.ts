@@ -1267,20 +1267,59 @@ export type ContentTopic = InsightTopic & { count: number };
  * from the whole, the filter is not honoured for this kind and the list is
  * empty, which the app reads as "no filter here". Cached for twelve hours.
  */
+/**
+ * The topic lists are the slowest thing this file computes: one WordPress
+ * request per site topic, twenty-odd of them, one after another so
+ * Cloudflare does not drop the burst. Cold, that is longer than the app
+ * waits for an answer (15 s), and on 2026-10-14 the Leadership Interviews
+ * screen logged exactly that: "[topics] failed ... AbortError" on the first
+ * open after the three-hour cache had lapsed, and nothing wrong on the
+ * next. So the app is never made to wait on the count: once a kind has
+ * been counted, the last answer is served at once when the cache lapses
+ * and the recount runs behind it. The only cold path left is a process
+ * that has never counted, which warmContentTopics() covers at start-up.
+ */
+const lastKnownTopics = new Map<string, ContentTopic[]>();
+const topicsRefreshing = new Set<string>();
+
+async function countTopics(
+  countFor: (categoryId?: number) => Promise<number>
+): Promise<ContentTopic[]> {
+  const all = await countFor();
+  if (all === 0) return [];
+  const counted: ContentTopic[] = [];
+  for (const topic of await listAnalystOpinionTopics()) {
+    counted.push({ ...topic, count: await countFor(topic.id) });
+  }
+  if (counted.every((topic) => topic.count === all)) return [];
+  return counted.filter((topic) => topic.count > 0 && topic.count < all);
+}
+
 async function listTopicsFor(
   kind: string,
   countFor: (categoryId?: number) => Promise<number>
 ): Promise<ContentTopic[]> {
-  return cached(`topics:${kind}`, config().MEDIA_CACHE_TTL_SECONDS * 12_000, async () => {
-    const all = await countFor();
-    if (all === 0) return [];
-    const counted: ContentTopic[] = [];
-    for (const topic of await listAnalystOpinionTopics()) {
-      counted.push({ ...topic, count: await countFor(topic.id) });
-    }
-    if (counted.every((topic) => topic.count === all)) return [];
-    return counted.filter((topic) => topic.count > 0 && topic.count < all);
-  });
+  const key = `topics:${kind}`;
+  const hit = cache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value as ContentTopic[];
+
+  const recount = () =>
+    cached(key, config().MEDIA_CACHE_TTL_SECONDS * 12_000, async () => {
+      const topics = await countTopics(countFor);
+      lastKnownTopics.set(kind, topics);
+      return topics;
+    });
+
+  const stale = lastKnownTopics.get(kind);
+  if (!stale) return recount();
+
+  if (!topicsRefreshing.has(kind)) {
+    topicsRefreshing.add(kind);
+    recount()
+      .catch(() => undefined)
+      .finally(() => topicsRefreshing.delete(kind));
+  }
+  return stale;
 }
 
 export const listPodcastTopics = () =>
@@ -1298,6 +1337,27 @@ export const listLeadershipInterviewTopics = () =>
     "leadership-interviews",
     async (categoryId) => (await listLeadershipInterviews(1, 1, categoryId)).total
   );
+
+/**
+ * Counts every kind's topics once, at start-up, so no reader's first open
+ * of a screen is the one that pays for the count. Sequential, and each
+ * kind's failure is its own: WordPress being slow for one list must not
+ * stop the others warming. Fire-and-forget from server.ts.
+ */
+export async function warmContentTopics(): Promise<void> {
+  const warmers = [
+    listAnalystOpinionTopics,
+    listLeadershipInterviewTopics,
+    listCaseStudyTopics,
+    listBlogTopics,
+    listPodcastTopics,
+    listVideoTopics,
+    listWebinarTopics
+  ];
+  for (const warm of warmers) {
+    await warm().catch(() => undefined);
+  }
+}
 
 export async function getCaseStudy(caseStudyId: string): Promise<CaseStudyDetail | null> {
   return getEditorialPost(caseStudyPostType, caseStudyId);
