@@ -30,6 +30,7 @@ import { whitepaperRouter } from "./routes/whitepapers.js";
 import { pushTokenRouter } from "./routes/push-tokens.js";
 import { notificationRouter } from "./routes/notifications.js";
 import { notificationConsoleRouter } from "./routes/notification-console.js";
+import { notificationInboxRouter } from "./routes/notification-inbox.js";
 import { analystOpinionRouter } from "./routes/analyst-opinions.js";
 import { caseStudyRouter } from "./routes/case-studies.js";
 import { leadershipInterviewRouter } from "./routes/leadership-interviews.js";
@@ -165,6 +166,7 @@ export function createApp() {
   app.use("/v1/push-token", pushTokenRouter);
   app.use("/v1/notifications", notificationRouter);
   app.use("/v1/notifications", notificationConsoleRouter);
+  app.use("/v1/notifications", notificationInboxRouter);
   app.use("/v1/news", newsRouter);
   app.use("/v1/galaxy", galaxyRouter);
   app.use("/v1/awards", awardsRouter);
