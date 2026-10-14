@@ -39,6 +39,10 @@ export type VideoItem = {
 };
 
 export type AnalystOpinionItem = {
+  /** The guest author named in the post's own "By …" line; null when there is none. */
+  author_name: string | null;
+  /** What they are: "Director of Global Advisory at BioCatch". */
+  author_role: string | null;
   excerpt: string | null;
   id: number;
   image_url: string | null;
@@ -176,6 +180,32 @@ function categoryName(post: WordPressPost): string | null {
     .map((term) => toText(term.name as string));
   if (!categories.length) return null;
   return categories.find((name) => !genericCategories.has(name.toLowerCase())) ?? categories[0] ?? null;
+}
+
+/**
+ * The guest author of a blog or opinion, from the post's own "By Jonathan
+ * Frost, Director of Global Advisory at BioCatch" line.
+ *
+ * Not the WordPress author: that is the IBSi staffer who published the
+ * piece. The site's convention puts the real author in the first paragraph
+ * of the body, name then role after a comma, and that line is what readers
+ * see on the website. Read from the body rather than the excerpt because
+ * the excerpt flattens paragraphs and the role runs into the first
+ * sentence. The first few lines only: a "By" further down is a quotation.
+ */
+function bylineFrom(post: WordPressPost): { author_name: string | null; author_role: string | null } {
+  const lines = htmlToPlainText(post.content?.rendered ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  for (const line of lines) {
+    const match = /^by\s+([^,]{2,80}?)(?:,\s*(.{2,160}?))?\.?$/i.exec(line);
+    if (match) {
+      return { author_name: match[1]!.trim(), author_role: match[2]?.trim() || null };
+    }
+  }
+  return { author_name: null, author_role: null };
 }
 
 /**
@@ -1059,12 +1089,15 @@ async function listEditorialPosts(
       const params: Record<string, string> = {};
       if (type.listWindowMonths) params.after = contentWindowStart(type.listWindowMonths);
       if (categoryId) params.categories = String(categoryId);
+      // `content` is asked for only to read the "By …" line off its first
+      // paragraph (bylineFrom); the list never sends bodies to the app.
       const { posts, total } = await fetchPostType(type.restBase, page, limit, {
-        fields: "id,date_gmt,link,title,excerpt,_links,_embedded",
+        fields: "id,date_gmt,link,title,excerpt,content,_links,_embedded",
         params
       });
       return {
         items: posts.map((post) => ({
+          ...bylineFrom(post),
           excerpt: excerptText(post.excerpt?.rendered) || null,
           id: post.id,
           image_url: featuredImage(post),
@@ -1104,6 +1137,7 @@ async function getEditorialPost(
       if (!post.id || !body) return null;
 
       return {
+        ...bylineFrom(post),
         body,
         body_html: bodyHtml,
         excerpt: excerptText(post.excerpt?.rendered) || null,
