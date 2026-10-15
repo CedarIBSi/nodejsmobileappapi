@@ -657,11 +657,25 @@ sends a reader to cedaribsi.events.
 Content is curated in `seed-data/events.json` (there is no CMS behind the events
 site to read) and loaded with `npm run seed:events`.
 
+#### `GET /v1/research-reports`
+
+Public Research Reports page content. The existing `title`, `intro`,
+`deliverables`, and `body` fields remain stable for released app builds. The
+same object also carries `reports[]`, each with `id`, `title`, and `image_url`.
+Prices and product links are deliberately excluded; the app uses the existing
+Express interest flow instead of linking to digital purchases.
+
+The API discovers WooCommerce products through WordPress REST when available,
+otherwise it reads the same paginated WordPress AJAX listing as the website.
+The report list is cached in-process for one hour. A WordPress failure serves
+the last successful list; before the first success it serves `reports: []`
+rather than failing the page.
+
 #### `GET /v1/ads`
 
 Public active house advertisements.
 
-All four public content endpoints use a 300-second cache window.
+Public content responses use a 300-second client cache window.
 
 ### Analyst opinions
 

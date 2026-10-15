@@ -64,6 +64,12 @@ export type InsightTopic = { id: number; name: string };
 
 export type MediaPage<T> = { items: T[]; total: number };
 
+export type ResearchReportItem = {
+  id: number | string;
+  image_url: string | null;
+  title: string;
+};
+
 type EmbeddedMedia = {
   source_url?: string;
   media_details?: { sizes?: Record<string, { source_url?: string } | undefined> };
@@ -307,13 +313,18 @@ export function clearMediaCache(): void {
   cache.clear();
 }
 
-async function wordPressRequest(url: URL, accept: string): Promise<Response> {
+async function wordPressRequest(
+  url: URL,
+  accept: string,
+  options: { body?: string; contentType?: string; method?: "GET" | "POST" } = {}
+): Promise<Response> {
   const env = config();
   const configuredOrigin = new URL(env.WORDPRESS_BASE_URL).origin;
   const headers: Record<string, string> = {
     Accept: accept,
     "User-Agent": env.WORDPRESS_USER_AGENT
   };
+  if (options.contentType) headers["Content-Type"] = options.contentType;
   if (env.WORDPRESS_BYPASS_HEADER && env.WORDPRESS_BYPASS_VALUE) {
     headers[env.WORDPRESS_BYPASS_HEADER] = env.WORDPRESS_BYPASS_VALUE;
   }
@@ -336,7 +347,9 @@ async function wordPressRequest(url: URL, accept: string): Promise<Response> {
     let response: Response;
     try {
       response = await fetch(currentUrl, {
+        body: options.body,
         headers,
+        method: options.method ?? "GET",
         redirect: "manual",
         signal: AbortSignal.timeout(env.WORDPRESS_TIMEOUT_MS)
       });
@@ -392,6 +405,179 @@ async function fetchPostType(
     posts: Array.isArray(posts) ? posts : [],
     total: Number(response.headers.get("x-wp-total") ?? 0)
   };
+}
+
+const reportsCacheTtlMs = 60 * 60 * 1000;
+const reportsFailureRetryMs = 5 * 60 * 1000;
+let reportsCache: { refreshAfter: number; value: ResearchReportItem[] } | null = null;
+let reportsLoad: Promise<ResearchReportItem[]> | null = null;
+
+function publicImageUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  const decoded = decodeEntities(value).trim();
+  const candidate = decoded.startsWith("//") ? `https:${decoded}` : decoded;
+  try {
+    const url = new URL(candidate, config().WORDPRESS_BASE_URL);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function attribute(tag: string, name: string): string | undefined {
+  const match = new RegExp(`\\b${name}\\s*=\\s*(["'])([\\s\\S]*?)\\1`, "i").exec(tag);
+  return match?.[2];
+}
+
+function reportImageFromCard(card: string): string | null {
+  const imageTag = /<img\b[^>]*>/i.exec(card)?.[0];
+  if (!imageTag) return null;
+
+  const candidates = (attribute(imageTag, "srcset") ?? "")
+    .split(",")
+    .map((entry) => /^(.*?)\s+(\d+)w\s*$/.exec(entry.trim()))
+    .filter((entry): entry is RegExpExecArray => entry !== null)
+    .map((entry) => ({ url: entry[1], width: Number(entry[2]) }));
+  const preferred = candidates.find((candidate) => candidate.width === 600)
+    ?? candidates.filter((candidate) => candidate.width <= 800).sort((a, b) => b.width - a.width)[0]
+    ?? candidates.sort((a, b) => a.width - b.width)[0];
+  return publicImageUrl(preferred?.url ?? attribute(imageTag, "src"));
+}
+
+/** Parses the theme's report cards without depending on the rest of its layout. */
+function reportsFromAjaxHtml(html: string): ResearchReportItem[] {
+  const starts = [...html.matchAll(/class\s*=\s*["'][^"']*\bartHorBlo\b[^"']*["']/gi)].map((match) => match.index);
+  const reports: ResearchReportItem[] = [];
+
+  starts.forEach((start, index) => {
+    const card = html.slice(start, starts[index + 1] ?? html.length);
+    const titleHtml = /<h6\b[^>]*>([\s\S]*?)<\/h6>/i.exec(card)?.[1];
+    const productLink = /<a\b[^>]*href\s*=\s*(["'])([^"']*\/product\/[^"']*)\1/i.exec(card)?.[2];
+    const title = toText(titleHtml ?? "");
+    if (!title || !productLink) return;
+
+    try {
+      const url = new URL(decodeEntities(productLink), config().WORDPRESS_BASE_URL);
+      const parts = url.pathname.split("/").filter(Boolean);
+      const productIndex = parts.lastIndexOf("product");
+      const slug = parts[productIndex + 1];
+      if (!slug) return;
+      reports.push({ id: decodeURIComponent(slug), image_url: reportImageFromCard(card), title });
+    } catch {
+      // One malformed card must not discard the rest of the listing.
+    }
+  });
+  return reports;
+}
+
+function ajaxHtml(payload: string): string {
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      for (const candidate of [record.html, record.content, record.data, record.posts]) {
+        if (typeof candidate === "string") return candidate;
+        if (candidate && typeof candidate === "object") {
+          const nested = candidate as Record<string, unknown>;
+          if (typeof nested.html === "string") return nested.html;
+          if (typeof nested.content === "string") return nested.content;
+        }
+      }
+    }
+  } catch {
+    // The endpoint normally returns HTML directly rather than JSON.
+  }
+  return payload;
+}
+
+async function reportsFromAjax(): Promise<ResearchReportItem[]> {
+  const reports: ResearchReportItem[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= 20; page += 1) {
+    const body = new URLSearchParams({
+      action: "get_research_items_by_category_for_listing",
+      cat_slug: "0",
+      pg_no: String(page),
+      post_type: "POST",
+      s: ""
+    }).toString();
+    const response = await wordPressRequest(
+      new URL("/wp-admin/admin-ajax.php", config().WORDPRESS_BASE_URL),
+      "text/html,application/json",
+      { body, contentType: "application/x-www-form-urlencoded;charset=UTF-8", method: "POST" }
+    );
+    const pageReports = reportsFromAjaxHtml(ajaxHtml(await response.text()));
+    if (pageReports.length === 0) break;
+    for (const report of pageReports) {
+      const key = String(report.id);
+      if (!seen.has(key)) {
+        seen.add(key);
+        reports.push(report);
+      }
+    }
+  }
+  return reports;
+}
+
+async function reportsFromRest(): Promise<ResearchReportItem[] | null> {
+  const typesUrl = new URL("/wp-json/wp/v2/types", config().WORDPRESS_BASE_URL);
+  const typesResponse = await wordPressRequest(typesUrl, "application/json");
+  const types = (await typesResponse.json()) as Record<string, { rest_base?: string }>;
+  const restBase = types.product?.rest_base;
+  if (!restBase) return null;
+
+  const reports: ResearchReportItem[] = [];
+  let page = 1;
+  do {
+    const result = await fetchPostType(restBase, page, 100, {
+      fields: "id,title,_links,_embedded"
+    });
+    reports.push(...result.posts.map((post) => ({
+      id: post.id,
+      image_url: featuredImage(post),
+      title: toText(post.title?.rendered)
+    })).filter((report) => report.title));
+    if (page * 100 >= result.total || result.posts.length === 0) break;
+    page += 1;
+  } while (page <= 20);
+  return reports.length ? reports : null;
+}
+
+async function loadResearchReports(): Promise<ResearchReportItem[]> {
+  try {
+    const rest = await reportsFromRest();
+    if (rest) return rest;
+  } catch {
+    // Product REST is optional; the website's own AJAX action is authoritative fallback.
+  }
+  return reportsFromAjax();
+}
+
+/** One-hour fresh cache; a last good list remains usable during WordPress failures. */
+export async function listResearchReports(): Promise<ResearchReportItem[]> {
+  const now = Date.now();
+  if (reportsCache && reportsCache.refreshAfter > now) return reportsCache.value;
+  if (reportsLoad) return reportsLoad;
+
+  reportsLoad = loadResearchReports()
+    .then((value) => {
+      reportsCache = { refreshAfter: Date.now() + reportsCacheTtlMs, value };
+      return value;
+    })
+    .catch(() => {
+      if (reportsCache) {
+        reportsCache.refreshAfter = Date.now() + reportsFailureRetryMs;
+        return reportsCache.value;
+      }
+      reportsCache = { refreshAfter: Date.now() + reportsFailureRetryMs, value: [] };
+      return [];
+    })
+    .finally(() => {
+      reportsLoad = null;
+    });
+  return reportsLoad;
 }
 
 /**
