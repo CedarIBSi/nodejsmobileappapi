@@ -521,37 +521,11 @@ async function reportsFromAjax(): Promise<ResearchReportItem[]> {
   return reports;
 }
 
-async function reportsFromRest(): Promise<ResearchReportItem[] | null> {
-  const typesUrl = new URL("/wp-json/wp/v2/types", config().WORDPRESS_BASE_URL);
-  const typesResponse = await wordPressRequest(typesUrl, "application/json");
-  const types = (await typesResponse.json()) as Record<string, { rest_base?: string }>;
-  const restBase = types.product?.rest_base;
-  if (!restBase) return null;
-
-  const reports: ResearchReportItem[] = [];
-  let page = 1;
-  do {
-    const result = await fetchPostType(restBase, page, 100, {
-      fields: "id,title,_links,_embedded"
-    });
-    reports.push(...result.posts.map((post) => ({
-      id: post.id,
-      image_url: featuredImage(post),
-      title: toText(post.title?.rendered)
-    })).filter((report) => report.title));
-    if (page * 100 >= result.total || result.posts.length === 0) break;
-    page += 1;
-  } while (page <= 20);
-  return reports.length ? reports : null;
-}
-
 async function loadResearchReports(): Promise<ResearchReportItem[]> {
-  try {
-    const rest = await reportsFromRest();
-    if (rest) return rest;
-  } catch {
-    // Product REST is optional; the website's own AJAX action is authoritative fallback.
-  }
+  // WordPress exposes `product`, but that collection also contains Journal
+  // subscriptions and event tickets (78 products on 2026-10-15) and its REST
+  // order differs from /reports-view-all/. The theme's AJAX action is the
+  // only source that applies the report-only scope and editorial ordering.
   return reportsFromAjax();
 }
 

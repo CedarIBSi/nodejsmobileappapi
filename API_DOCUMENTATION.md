@@ -665,8 +665,9 @@ same object also carries `reports[]`, each with `id`, `title`, and `image_url`.
 Prices and product links are deliberately excluded; the app uses the existing
 Express interest flow instead of linking to digital purchases.
 
-The API discovers WooCommerce products through WordPress REST when available,
-otherwise it reads the same paginated WordPress AJAX listing as the website.
+The general WooCommerce REST collection also contains Journal subscriptions
+and event tickets, so the API reads the same paginated WordPress AJAX listing
+as the website to preserve its report-only scope and editorial order.
 The report list is cached in-process for one hour. A WordPress failure serves
 the last successful list; before the first success it serves `reports: []`
 rather than failing the page.
