@@ -271,10 +271,31 @@ async function mobileImage(post: WordPressPost): Promise<string | null> {
   return typeof candidate === "number" ? mediaUrlById(candidate) : candidate;
 }
 
-type CacheEntry<T> = { expiresAt: number; value: T };
+/**
+ * `expiresAt` is when an entry stops being fresh; `staleUntil` is when it
+ * stops being servable at all. They are equal unless the caller asked for a
+ * stale window.
+ */
+type CacheEntry<T> = { expiresAt: number; staleUntil: number; value: T };
 const cache = new Map<string, CacheEntry<unknown>>();
+/** One WordPress load per key at a time, however many readers ask at once. */
+const inFlight = new Map<string, Promise<unknown>>();
 
-async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+/**
+ * With `staleMs`, an expired entry is still answered at once for that long
+ * while one fresh load runs in the background (stale-while-revalidate).
+ * Without it, the first reader after expiry used to wait for WordPress -
+ * about 3 seconds for the news list, measured on the live API 2026-10-16 -
+ * which is the slow first screen the app's Home showed every 15 minutes.
+ * A failed background load keeps the stale entry, so a WordPress outage
+ * serves the last good list rather than an error.
+ */
+async function cached<T>(
+  key: string,
+  ttlMs: number,
+  load: () => Promise<T>,
+  staleMs = 0
+): Promise<T> {
   const now = Date.now();
   const hit = cache.get(key);
   if (hit && hit.expiresAt > now) {
@@ -284,28 +305,55 @@ async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Pr
     cache.set(key, hit);
     return hit.value as T;
   }
+  if (hit && hit.staleUntil > now) {
+    cache.delete(key);
+    cache.set(key, hit);
+    refresh(key, ttlMs, load, staleMs).catch((error: unknown) =>
+      console.error("[wordpress] background refresh failed", {
+        key,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    return hit.value as T;
+  }
   if (hit) cache.delete(key);
 
-  const value = await load();
-  if (ttlMs > 0) {
-    const insertionTime = Date.now();
+  return refresh(key, ttlMs, load, staleMs);
+}
 
-    // Expired keys used to remain forever unless that exact key was requested
-    // again. A public caller could therefore fill memory with unique searches.
-    for (const [candidateKey, entry] of cache) {
-      if (entry.expiresAt <= insertionTime) cache.delete(candidateKey);
-    }
+function refresh<T>(key: string, ttlMs: number, load: () => Promise<T>, staleMs: number): Promise<T> {
+  const running = inFlight.get(key);
+  if (running) return running as Promise<T>;
 
-    const maximumEntries = config().MEDIA_CACHE_MAX_ENTRIES;
-    while (cache.size >= maximumEntries) {
-      const oldestKey = cache.keys().next().value as string | undefined;
-      if (oldestKey === undefined) break;
-      cache.delete(oldestKey);
-    }
+  const loading = load()
+    .then((value) => {
+      store(key, value, ttlMs, staleMs);
+      return value;
+    })
+    .finally(() => inFlight.delete(key));
+  inFlight.set(key, loading);
+  return loading;
+}
 
-    cache.set(key, { expiresAt: insertionTime + ttlMs, value });
+function store<T>(key: string, value: T, ttlMs: number, staleMs: number): void {
+  if (ttlMs <= 0) return;
+  const insertionTime = Date.now();
+
+  // Dead keys used to remain forever unless that exact key was requested
+  // again. A public caller could therefore fill memory with unique searches.
+  for (const [candidateKey, entry] of cache) {
+    if (entry.staleUntil <= insertionTime) cache.delete(candidateKey);
   }
-  return value;
+
+  cache.delete(key);
+  const maximumEntries = config().MEDIA_CACHE_MAX_ENTRIES;
+  while (cache.size >= maximumEntries) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+
+  const expiresAt = insertionTime + ttlMs;
+  cache.set(key, { expiresAt, staleUntil: expiresAt + staleMs, value });
 }
 
 /** Exposed for tests and for operational cache busting. */
@@ -771,6 +819,13 @@ function contentWindowStart(months: number): string {
   return start.toISOString().slice(0, 19);
 }
 
+/**
+ * How long an expired news list may still be answered while a fresh one
+ * loads behind it. A day covers a quiet night; past that the reader waits
+ * for WordPress rather than seeing a day-old front page.
+ */
+const newsListStaleMs = 24 * 60 * 60 * 1000;
+
 export async function listNews(
   page: number,
   limit: number,
@@ -814,7 +869,7 @@ export async function listNews(
     }
 
     return { items, total };
-  });
+  }, newsListStaleMs);
 }
 
 /**
