@@ -1140,7 +1140,16 @@ export async function getPerspectiveArticleContent(link: string): Promise<Perspe
         url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
         url.searchParams.set("_fields", "id,link,title,content,_links,_embedded");
 
-        const response = await wordPressRequest(url, "application/json");
+        let response: Response;
+        try {
+          response = await wordPressRequest(url, "application/json");
+        } catch (error) {
+          // The site deliberately disables some standard REST collections
+          // while leaving its custom editorial collections available. One
+          // restricted type must not prevent trying the remaining types.
+          if (error instanceof HttpError && /returned (403|404) /.test(error.message)) continue;
+          throw error;
+        }
         const posts = (await response.json()) as WordPressPost[];
         const post = Array.isArray(posts) ? posts[0] : undefined;
         if (!post?.id) continue;
