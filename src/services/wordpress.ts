@@ -1013,6 +1013,12 @@ export async function listNewsCategories(): Promise<NewsCategoryItem[]> {
 
 /** One article's body, as plain text ready for the app to render. */
 export type ArticleContent = { author_name: string | null; html: string | null; text: string | null };
+
+export type PerspectiveArticleContent = ArticleContent & {
+  image_url: string | null;
+  link: string;
+  title: string;
+};
 export type ArticleMetadata = {
   headline: string;
   image_url: string | null;
@@ -1110,6 +1116,72 @@ export async function getArticleContent(articleId: string): Promise<ArticleConte
       return text || html ? { author_name: authorName(post), html, text } : null;
     }
   );
+}
+
+/**
+ * A curated Perspective can point at any editorial WordPress post type, not
+ * only `ibsi_news`. Resolve its canonical permalink slug across the post types
+ * the API already supports and return one common native-reader shape.
+ */
+export async function getPerspectiveArticleContent(link: string): Promise<PerspectiveArticleContent | null> {
+  const slug = newsSlugFromLink(link);
+  if (!slug) return null;
+
+  return cached(
+    `perspective-article:v1:${slug}`,
+    config().MEDIA_CACHE_TTL_SECONDS * 1000,
+    async () => {
+      const restBases = ["posts", "pages", "blogs", "articles", "ibsi_news", "leadership-interview", "casestudy"];
+
+      for (const restBase of restBases) {
+        const url = new URL(`/wp-json/wp/v2/${restBase}`, config().WORDPRESS_BASE_URL);
+        url.searchParams.set("slug", slug);
+        url.searchParams.set("per_page", "1");
+        url.searchParams.set("_embed", "wp:featuredmedia,author,wp:term");
+        url.searchParams.set("_fields", "id,link,title,content,_links,_embedded");
+
+        const response = await wordPressRequest(url, "application/json");
+        const posts = (await response.json()) as WordPressPost[];
+        const post = Array.isArray(posts) ? posts[0] : undefined;
+        if (!post?.id) continue;
+
+        const html = post.content?.rendered ?? null;
+        const text = htmlToPlainText(html ?? "") || null;
+        if (!text && !html) return null;
+
+        return {
+          author_name: authorName(post),
+          html,
+          image_url: featuredImage(post),
+          link: post.link ?? link,
+          text,
+          title: toText(post.title?.rendered)
+        };
+      }
+
+      return null;
+    }
+  );
+}
+
+/** Fetches a database-curated WordPress image through the API's WAF access. */
+export async function getWordPressImage(imageUrl: string): Promise<{ body: Buffer; contentType: string }> {
+  const response = await wordPressRequest(new URL(imageUrl), "image/*");
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (!contentType.startsWith("image/")) {
+    throw new HttpError(502, "WordPress returned a non-image asset", "WORDPRESS_UNAVAILABLE");
+  }
+
+  const declaredSize = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredSize) && declaredSize > 10 * 1024 * 1024) {
+    throw new HttpError(502, "WordPress image is too large", "WORDPRESS_UNAVAILABLE");
+  }
+
+  const body = Buffer.from(await response.arrayBuffer());
+  if (body.length > 10 * 1024 * 1024) {
+    throw new HttpError(502, "WordPress image is too large", "WORDPRESS_UNAVAILABLE");
+  }
+  return { body, contentType };
 }
 
 export async function getArticleBody(articleId: string): Promise<string | null> {

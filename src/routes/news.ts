@@ -7,6 +7,7 @@ import { pagination, paginationSchema } from "../lib/pagination.js";
 import { privateRoute } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { newsRegionSlugs } from "../lib/news-regions.js";
+import { getHomePerspectiveArticle, homePerspectiveArticleId } from "../services/homePerspective.js";
 import {
   getArticleContent,
   listNews,
@@ -86,6 +87,18 @@ newsRouter.get(
   validate(articleParams, "params"),
   asyncHandler(async (req, res) => {
     const { news_article_id: articleId } = req.params as { news_article_id: string };
+
+    // Compatibility for the current app: Perspective cards historically open
+    // the news reader. The stable Perspective id now resolves here even though
+    // the underlying WordPress item is not an `ibsi_news` post.
+    if (articleId === homePerspectiveArticleId) {
+      const article = await getHomePerspectiveArticle();
+      if (!article) throw new HttpError(404, "Perspective article not found", "PERSPECTIVE_NOT_FOUND");
+      res.set("Cache-Control", `public, max-age=${publicCacheSeconds}`);
+      res.json({ article });
+      return;
+    }
+
     const content = await getArticleContent(articleId);
 
     if (content === null || content.text === null) {

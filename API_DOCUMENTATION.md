@@ -409,16 +409,20 @@ Public and cached for 300 seconds. Returns the single editorially curated IBSi P
 ```json
 {
   "perspective": {
-    "article_id": null,
+    "article_id": "perspective:1",
     "title": "Banks recalibrate as resilience becomes the new technology mandate",
-    "image_url": "https://ibsintelligence.com/wp-content/uploads/2026/03/IBSi-West-Asia-Crisis-1x1-MPU-1-1536x1536.png",
+    "image_url": "https://api.ibsintelligence.com/v1/home/perspective/image",
     "link": "https://ibsintelligence.com/banks-recalibrate-as-resilience-becomes-the-new-technology-mandate-2/",
     "updated_at": "2026-10-09T12:00:00.000Z"
   }
 }
 ```
 
-`article_id` is optional: when present the app may open its native article detail; when null it opens `link`. The endpoint returns `{ "perspective": null }` when the row is inactive, expired, or has an empty title, image, or link. Editors manage the singleton row (`id = 1`) in pgAdmin. Set `is_active = false` to hide it, use `ends_at` for automatic expiry, and always set `updated_at = now()` when changing its content so clients can identify the revision. Migration `037_home_perspective.sql` creates and seeds the row and must be recorded in `schema_migrations` before this route is deployed.
+`article_id` is the stable native-reader id `perspective:1`. The image URL is an API proxy so WordPress/Cloudflare cannot reject the app's image request. The endpoint returns `{ "perspective": null }` when the row is inactive, expired, or has an empty title, image, or link. Editors manage the singleton row (`id = 1`) in pgAdmin. Set `is_active = false` to hide it, use `ends_at` for automatic expiry, and always set `updated_at = now()` when changing its content so clients can identify the revision. Migration `037_home_perspective.sql` creates and seeds the row and must be recorded in `schema_migrations` before this route is deployed.
+
+#### `GET /v1/home/perspective/article`
+
+Public and cached for 300 seconds. Resolves the curated Perspective permalink across the supported WordPress editorial post types and returns `{ article: { id, title, author_name, author_role, body, body_html, image_url, link } }`. The complete plain and rich bodies are both included. `author_role` is null when WordPress has no separate role field. For compatibility with existing app builds, `GET /v1/news/articles/perspective%3A1` returns the identical article object.
 
 #### `GET /v1/journals/latest`
 

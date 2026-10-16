@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { asyncHandler } from "../lib/async-handler.js";
-import { getHomePerspective } from "../services/homePerspective.js";
-import { listHomeFeatured } from "../services/wordpress.js";
+import { HttpError } from "../lib/errors.js";
+import {
+  getHomePerspective,
+  getHomePerspectiveArticle,
+  getHomePerspectiveSourceImageUrl
+} from "../services/homePerspective.js";
+import { getWordPressImage, listHomeFeatured } from "../services/wordpress.js";
 
 export const homeRouter = Router();
 
@@ -25,4 +30,19 @@ homeRouter.get("/perspective", asyncHandler(async (_req, res) => {
   const perspective = await getHomePerspective();
   res.set("Cache-Control", "public, max-age=300");
   res.json({ perspective });
+}));
+
+homeRouter.get("/perspective/article", asyncHandler(async (_req, res) => {
+  const article = await getHomePerspectiveArticle();
+  if (!article) throw new HttpError(404, "Perspective article not found", "PERSPECTIVE_NOT_FOUND");
+  res.set("Cache-Control", "public, max-age=300");
+  res.json({ article });
+}));
+
+homeRouter.get("/perspective/image", asyncHandler(async (_req, res) => {
+  const imageUrl = await getHomePerspectiveSourceImageUrl();
+  if (!imageUrl) throw new HttpError(404, "Perspective image not found", "PERSPECTIVE_IMAGE_NOT_FOUND");
+  const image = await getWordPressImage(imageUrl);
+  res.set("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400");
+  res.type(image.contentType).send(image.body);
 }));
