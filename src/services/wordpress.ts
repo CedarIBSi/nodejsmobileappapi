@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { HttpError } from "../lib/errors.js";
+import { load } from "cheerio";
 import {
   findNewsRegion,
   newsRegionTagParam,
@@ -68,6 +69,18 @@ export type ResearchReportItem = {
   id: number | string;
   image_url: string | null;
   title: string;
+};
+
+export type ResearchReportSection = {
+  content_html: string;
+  key: string;
+  title: string;
+};
+
+export type ResearchReportDetail = ResearchReportItem & {
+  description_html: string | null;
+  page_count: number | null;
+  sections: ResearchReportSection[];
 };
 
 type EmbeddedMedia = {
@@ -600,6 +613,142 @@ export async function listResearchReports(): Promise<ResearchReportItem[]> {
       reportsLoad = null;
     });
   return reportsLoad;
+}
+
+const reportDetailCacheTtlMs = 5 * 60 * 1000;
+const reportSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const reportSectionDefinitions = [
+  { key: "highlights", labels: ["report highlights", "highlights"], title: "Report highlights" },
+  { key: "benefits", labels: ["why subscribe?", "why subscribe", "benefits"], title: "Why subscribe?" },
+  {
+    key: "audience",
+    labels: ["who finds this report useful?", "who finds this report useful", "intended audience"],
+    title: "Who finds this report useful?"
+  },
+  { key: "contents", labels: ["table of contents", "contents"], title: "Table of Contents" }
+] as const;
+
+function normalizedLabel(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** Allow useful editorial markup only; all styling and active content is discarded. */
+function cleanReportHtml(fragment: string | null | undefined): string | null {
+  if (!fragment?.trim()) return null;
+  const $ = load(`<div id="report-fragment">${fragment}</div>`, null, false);
+  const root = $("#report-fragment");
+  root.find("script,style,form,nav,header,footer,iframe,object,embed,input,button,select,textarea,img,svg").remove();
+  root.find("a").each((_index, element) => {
+    $(element).replaceWith($(element).contents());
+  });
+
+  const allowed = new Set([
+    "p", "br", "ul", "ol", "li", "strong", "b", "em", "i", "u", "blockquote",
+    "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th", "td"
+  ]);
+  root.find("*").each((_index, element) => {
+    const node = $(element);
+    if (element.tagName === "div" || element.tagName === "span" || element.tagName === "section") {
+      node.replaceWith(node.contents());
+    } else if (!allowed.has(element.tagName)) {
+      node.replaceWith(node.contents());
+    } else {
+      for (const attributeName of Object.keys(element.attribs ?? {})) node.removeAttr(attributeName);
+    }
+  });
+
+  const html = root.html()?.replace(/(?:\s*<br>\s*){3,}/gi, "<br><br>").trim() ?? "";
+  return toText(html) ? html : null;
+}
+
+function reportSectionHtml($: ReturnType<typeof load>, marker: ReturnType<ReturnType<typeof load>>): string | null {
+  const target = marker.attr("data-bs-target") ?? marker.attr("data-target") ?? marker.attr("href");
+  if (target?.startsWith("#") && /^#[A-Za-z][\w:.-]*$/.test(target)) {
+    const targeted = $(target).first();
+    if (targeted.length) {
+      const body = targeted.find(".accordion-body,.card-body,.tab-pane").first();
+      const cleaned = cleanReportHtml((body.length ? body : targeted).html());
+      if (cleaned) return cleaned;
+    }
+  }
+
+  const item = marker.closest(".accordion-item,.card,.vc_tta-panel,.elementor-accordion-item");
+  if (item.length) {
+    const body = item.find(".accordion-body,.card-body,.vc_tta-panel-body,.elementor-tab-content,.collapse").first();
+    const cleaned = cleanReportHtml(body.html());
+    if (cleaned) return cleaned;
+  }
+
+  for (const candidate of [marker.next(), marker.parent().next(), marker.parent().children().not(marker)]) {
+    const cleaned = cleanReportHtml(candidate.first().html());
+    if (cleaned) return cleaned;
+  }
+  return null;
+}
+
+function reportDetailFromHtml(item: ResearchReportItem, html: string): ResearchReportDetail {
+  const $ = load(html);
+  $("script,style,form,nav,header,footer,iframe,object,embed").remove();
+  const title = toText($("h1.product_title,h1.entry-title,h1").first().html() ?? "") || item.title;
+  const productRoot = $(".product.type-product,.single-product,main").first();
+  const rootText = (productRoot.length ? productRoot : $("body")).text().replace(/\s+/g, " ");
+  const pages = /\b(\d{1,4})\s+pages?\b/i.exec(rootText);
+  const parsedPageCount = pages ? Number(pages[1]) : null;
+  const pageCount = parsedPageCount && parsedPageCount > 0 ? parsedPageCount : null;
+
+  let descriptionHtml = cleanReportHtml($(".woocommerce-product-details__short-description").first().html());
+  if (!descriptionHtml) {
+    const titleNode = $("h1.product_title,h1.entry-title,h1").first();
+    const pieces: string[] = [];
+    titleNode.nextAll().each((_index, element) => {
+      const node = $(element);
+      const text = normalizedLabel(node.text());
+      if (reportSectionDefinitions.some((section) => section.labels.includes(text as never))) return false;
+      if (/related reports|share report|buy now|questions about this report/i.test(text)) return false;
+      pieces.push(node.toString());
+    });
+    descriptionHtml = cleanReportHtml(pieces.join(""));
+  }
+
+  const sections: ResearchReportSection[] = [];
+  const used = new Set<string>();
+  $("button,h2,h3,h4,h5,h6,a,[role='button']").each((_index, element) => {
+    const marker = $(element);
+    const label = normalizedLabel(marker.text());
+    const definition = reportSectionDefinitions.find((section) => section.labels.includes(label as never));
+    if (!definition || used.has(definition.key)) return;
+    const contentHtml = reportSectionHtml($, marker);
+    if (!contentHtml) return;
+    used.add(definition.key);
+    sections.push({ content_html: contentHtml, key: definition.key, title: definition.title });
+  });
+
+  const pageImage = publicImageUrl(
+    $(".woocommerce-product-gallery__image img").first().attr("data-large_image")
+      ?? $("meta[property='og:image']").attr("content")
+  );
+  return {
+    description_html: descriptionHtml,
+    id: item.id,
+    image_url: pageImage ?? item.image_url,
+    page_count: pageCount,
+    sections,
+    title
+  };
+}
+
+/** Public report copy from its live WooCommerce product page. */
+export async function getResearchReport(reportId: string): Promise<ResearchReportDetail | null> {
+  if (!reportSlugPattern.test(reportId)) return null;
+  const catalogue = await listResearchReports();
+  const item = catalogue.find((report) => String(report.id) === reportId);
+  if (!item) return null;
+
+  return cached(`research-report-detail:v1:${reportId}`, reportDetailCacheTtlMs, async () => {
+    const url = new URL(`/product/${encodeURIComponent(reportId)}/`, config().WORDPRESS_BASE_URL);
+    const response = await wordPressRequest(url, "text/html");
+    return reportDetailFromHtml(item, await response.text());
+  });
 }
 
 /**

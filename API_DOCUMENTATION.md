@@ -666,6 +666,30 @@ site to read) and loaded with `npm run seed:events`.
 Public Research Reports page content. The existing `title`, `intro`,
 `deliverables`, and `body` fields remain stable for released app builds. The
 same object also carries `reports[]`, each with `id`, `title`, and `image_url`.
+
+#### `GET /v1/research-reports/:id`
+
+Public and cached for 300 seconds. `id` is the same stable WooCommerce product slug returned by the listing. The API fetches the live product page through the server's WordPress access and returns clean editorial content only:
+
+```json
+{
+  "report": {
+    "id": "applications-of-artificial-intelligence-in-banking",
+    "title": "Applications of Artificial Intelligence In Banking Q4 2025",
+    "image_url": "https://ibsintelligence.com/wp-content/uploads/...png",
+    "page_count": 82,
+    "description_html": "<p>...</p>",
+    "sections": [
+      { "key": "highlights", "title": "Report highlights", "content_html": "<ul><li>...</li></ul>" },
+      { "key": "benefits", "title": "Why subscribe?", "content_html": "<ul><li>...</li></ul>" },
+      { "key": "audience", "title": "Who finds this report useful?", "content_html": "<ul><li>...</li></ul>" },
+      { "key": "contents", "title": "Table of Contents", "content_html": "<p>...</p>" }
+    ]
+  }
+}
+```
+
+`page_count` and `description_html` are nullable. Unavailable sections are omitted from `sections`; available sections retain their website order. Scripts, forms, navigation, checkout controls, images and related-report links are removed. Unknown slugs return `404 RESEARCH_REPORT_NOT_FOUND`; WordPress failures retain their `WORDPRESS_UNAVAILABLE`/`WORDPRESS_UNREACHABLE` error code. Express Interest remains `POST /v1/interest` with the report title as `topic`.
 Prices and product links are deliberately excluded; the app uses the existing
 Express interest flow instead of linking to digital purchases.
 
