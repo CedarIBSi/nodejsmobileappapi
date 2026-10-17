@@ -697,14 +697,27 @@ function reportDetailFromHtml(item: ResearchReportItem, html: string): ResearchR
   const pageCount = parsedPageCount && parsedPageCount > 0 ? parsedPageCount : null;
 
   let descriptionHtml = cleanReportHtml($(".woocommerce-product-details__short-description").first().html());
+  if (descriptionHtml && /^\s*<p>\s*\d{1,4}\s+pages?\s*<\/p>\s*$/i.test(descriptionHtml)) {
+    descriptionHtml = null;
+  }
   if (!descriptionHtml) {
-    const titleNode = $("h1.product_title,h1.entry-title,h1").first();
+    const scope = productRoot.length ? productRoot : $("main").first();
+    const orderedNodes = scope.find("*").toArray();
+    const firstSectionNode = scope
+      .find("button,h2,h3,h4,h5,h6,a,[role='button']")
+      .toArray()
+      .find((element) => {
+        const label = normalizedLabel($(element).text());
+        return reportSectionDefinitions.some((section) => section.labels.includes(label as never));
+      });
+    const sectionBoundary = firstSectionNode ? orderedNodes.indexOf(firstSectionNode) : orderedNodes.length;
     const pieces: string[] = [];
-    titleNode.nextAll().each((_index, element) => {
+    scope.find("p").each((_index, element) => {
+      if (orderedNodes.indexOf(element) >= sectionBoundary) return;
       const node = $(element);
       const text = normalizedLabel(node.text());
-      if (reportSectionDefinitions.some((section) => section.labels.includes(text as never))) return false;
-      if (/related reports|share report|buy now|questions about this report/i.test(text)) return false;
+      if (!text || /^\d{1,4}\s+pages?$/.test(text)) return;
+      if (/related reports|share report|buy now|questions about this report/i.test(text)) return;
       pieces.push(node.toString());
     });
     descriptionHtml = cleanReportHtml(pieces.join(""));
