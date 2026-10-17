@@ -13,6 +13,7 @@ import { notifySubscriptionChange } from "../lib/purchaseEmail.js";
 import { reconcileStoreSubscription, type StoreProvider } from "../lib/subscriptionReconcile.js";
 import { refreshLapsedSubscription } from "../lib/subscriptionRefresh.js";
 import { recordStoreTransaction, type StoreTransactionInput } from "../lib/storeTransaction.js";
+import { matchesStoreProduct } from "../lib/storeCatalogue.js";
 
 export const subscriptionRouter = Router();
 const verifyPurchaseSchema = z.discriminatedUnion("platform", [
@@ -130,11 +131,12 @@ subscriptionRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof verifyPurchaseSchema>;
     const planResult = await query<{
+      code: string;
       apple_product_id: string | null;
       google_product_id: string | null;
       id: string;
     }>(
-      "SELECT id, apple_product_id, google_product_id FROM subscription_plans WHERE id = $1 AND status = 'active'",
+      "SELECT id, code, apple_product_id, google_product_id FROM subscription_plans WHERE id = $1 AND status = 'active'",
       [body.plan_id]
     );
     const plan = planResult.rows[0];
@@ -151,7 +153,7 @@ subscriptionRouter.post(
     let googleProductId: string | null = null;
 
     if (body.platform === "android") {
-      if (plan.google_product_id !== body.product_id) {
+      if (!matchesStoreProduct(plan.code, plan.google_product_id, body.product_id)) {
         throw new HttpError(400, "Product does not match the selected plan", "PRODUCT_MISMATCH");
       }
       const summary = await getGoogleSubscription(body.purchase_token);
@@ -169,7 +171,7 @@ subscriptionRouter.post(
       googleOrderId = summary.latestOrderId;
       googleProductId = summary.productId;
     } else {
-      if (plan.apple_product_id !== body.product_id) {
+      if (!matchesStoreProduct(plan.code, plan.apple_product_id, body.product_id)) {
         throw new HttpError(400, "Product does not match the selected plan", "PRODUCT_MISMATCH");
       }
       const summary = await getAppleSubscription(body.transaction_id);

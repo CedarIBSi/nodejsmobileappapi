@@ -36,17 +36,17 @@ type Product = {
 
 export const products: Record<ProductCode, Product> = {
   journal_india: {
-    name: "IBSi FinTech Journal India",
+    name: "IBSi FinTech Journal India Edition",
     editions: ["india"],
     entitlements: ["insights", "journal_india"]
   },
   journal_global: {
-    name: "IBSi FinTech Journal Global",
+    name: "IBSi FinTech Journal Global Edition",
     editions: ["global"],
     entitlements: ["insights", "journal_global"]
   },
   journal_all: {
-    name: "IBSi FinTech Journal India + Global",
+    name: "IBSi FinTech Journal Global + India Edition",
     editions: ["india", "global"],
     entitlements: ["insights", "journal_india", "journal_global"]
   }

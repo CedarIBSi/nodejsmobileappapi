@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { isProductCode, products } from "./catalogue.js";
 import { HttpError } from "./errors.js";
+import { planCodeForStoreProduct } from "./storeCatalogue.js";
 
 export type StoreProvider = "google_play" | "apple";
 
@@ -22,7 +23,14 @@ export async function planIdForStoreProduct(
     `SELECT id FROM subscription_plans WHERE ${column} = $1 LIMIT 1`,
     [productId]
   );
-  return result.rows[0]?.id ?? null;
+  if (result.rows[0]) return result.rows[0].id;
+  const code = planCodeForStoreProduct(productId);
+  if (!code) return null;
+  const legacy = await client.query<{ id: string }>(
+    "SELECT id FROM subscription_plans WHERE code = $1 LIMIT 1",
+    [code]
+  );
+  return legacy.rows[0]?.id ?? null;
 }
 
 /**
