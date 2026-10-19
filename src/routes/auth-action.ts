@@ -134,7 +134,7 @@ const renderPage = (parts: { body: string; heading: string; title: string }) => 
 </head>
 <body>
   <div class="card">
-    <p class="brand">IBSi News</p>
+    <p class="brand">IBSi FinTech Insights</p>
     <h1>${escapeHtml(parts.heading)}</h1>
     ${parts.body}
   </div>
@@ -146,7 +146,7 @@ const renderPage = (parts: { body: string; heading: string; title: string }) => 
  * The three intercepted modes are not the same errand, and the page said they
  * were.
  *
- * Every one of them rendered "You are one step from finishing your IBSi News
+ * Every one of them rendered "You are one step from finishing your IBSi FinTech Insights
  * account" under the heading "Confirm your email address". For verifyEmail
  * that is right. For recoverEmail it is wrong in a way that matters: that link
  * goes to the *old* address after someone changed the account's email, so the
@@ -168,27 +168,27 @@ const modeCopy: Record<
     button: "Restore my email address",
     heading: "Restore your email address",
     intro:
-      "The email address on your IBSi News account was changed. Confirm below to change it back to this address.",
+      "The email address on your IBSi FinTech Insights account was changed. Confirm below to change it back to this address.",
     successBody:
-      "<p>Your account's email address has been restored.</p><p>If you did not ask for it to be changed, someone else may have access to your account. Open the IBSi News app and reset your password now.</p>",
+      "<p>Your account's email address has been restored.</p><p>If you did not ask for it to be changed, someone else may have access to your account. Open the IBSi FinTech Insights app and reset your password now.</p>",
     successHeading: "Email address restored"
   },
   verifyAndChangeEmail: {
     button: "Confirm my new email address",
     heading: "Confirm your new email address",
     intro:
-      "Confirm that this is the address you want to use for your IBSi News account.",
+      "Confirm that this is the address you want to use for your IBSi FinTech Insights account.",
     successBody:
-      "<p>Your new email address is confirmed. Open the IBSi News app and sign in with it.</p><p class=\"muted\">You can close this page.</p>",
+      "<p>Your new email address is confirmed. Open the IBSi FinTech Insights app and sign in with it.</p><p class=\"muted\">You can close this page.</p>",
     successHeading: "Email address confirmed"
   },
   verifyEmail: {
     button: "Confirm my email address",
     heading: "Confirm your email address",
     intro:
-      "You are one step from finishing your IBSi News account. Confirm the email address this message was sent to.",
+      "You are one step from finishing your IBSi FinTech Insights account. Confirm the email address this message was sent to.",
     successBody:
-      "<p>Your email address is confirmed. Open the IBSi News app on your phone and sign in to finish setting up your account.</p><p class=\"muted\">You can close this page.</p>",
+      "<p>Your email address is confirmed. Open the IBSi FinTech Insights app on your phone and sign in to finish setting up your account.</p><p class=\"muted\">You can close this page.</p>",
     successHeading: "Email confirmed"
   }
 };
@@ -220,9 +220,9 @@ const renderUnusableLink = () =>
   renderPage({
     body: `
     <p>This link is not valid. Verification and password links expire, and each one can be used only once.</p>
-    <p>Open the IBSi News app and sign in to have a new one sent to you.</p>`,
+    <p>Open the IBSi FinTech Insights app and sign in to have a new one sent to you.</p>`,
     heading: "This link is not valid",
-    title: "Link not valid - IBSi News"
+    title: "Link not valid - IBSi FinTech Insights"
   });
 
 /**
@@ -335,7 +335,7 @@ authActionRouter.get("/", asyncHandler(async (req, res) => {
     </form>
     <p class="muted">Opening this email on your phone completes it automatically, without this step.</p>`,
     heading: copy.heading,
-    title: copy.heading + " - IBSi News"
+    title: copy.heading + " - IBSi FinTech Insights"
   }));
 }));
 
@@ -367,9 +367,9 @@ authActionRouter.post(
       res.status(400).type("html").send(renderPage({
         body: `
         <p>This link is no longer valid. Verification links expire, and each one can be used only once.</p>
-        <p>Open the IBSi News app and sign in to have a new one sent to you.</p>`,
+        <p>Open the IBSi FinTech Insights app and sign in to have a new one sent to you.</p>`,
         heading: "This link has expired",
-        title: "Link expired - IBSi News"
+        title: "Link expired - IBSi FinTech Insights"
       }));
       return;
     }
@@ -379,7 +379,7 @@ authActionRouter.post(
     res.type("html").send(renderPage({
       body: copy.successBody,
       heading: copy.successHeading,
-      title: copy.successHeading + " - IBSi News"
+      title: copy.successHeading + " - IBSi FinTech Insights"
     }));
   })
 );
