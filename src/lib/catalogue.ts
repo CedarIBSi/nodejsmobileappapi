@@ -75,3 +75,13 @@ export function journalEditionOf(editionType: string | null | undefined): Journa
   if (/\bglobal\b/.test(value)) return "global";
   return null;
 }
+
+/**
+ * SQL for `journalEditionOf`: "india" wins when both words appear, as it
+ * does in the classifier, so the two can never disagree about an issue.
+ * Shared by the journal listing and the archive-window check.
+ */
+export const journalEditionSql: Record<JournalEdition, string> = {
+  india: `edition_type ~* '\\mindia\\M'`,
+  global: `edition_type ~* '\\mglobal\\M' AND edition_type !~* '\\mindia\\M'`
+};

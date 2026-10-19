@@ -3,6 +3,7 @@ import {
   type EntitlementType,
   type JournalEdition,
   journalEditions,
+  journalEditionSql,
   journalEntitlement
 } from "./catalogue.js";
 
@@ -142,6 +143,27 @@ export async function resolveArchiveAccess(
     [userId, fullArchiveIntervals]
   );
 
+  // The newest published issue of each edition. A monthly window never starts
+  // after it: the editions publish on their own schedules, and the single
+  // window above is set from whichever edition is newest. When India had an
+  // October issue and Global's newest was September, a Global monthly
+  // subscriber - or an India subscriber who upgraded to Global + India - was
+  // windowed to October and could open no Global issue at all (2026-10-19).
+  // Only consulted when someone holds a windowed edition.
+  const latestByEdition: Partial<Record<JournalEdition, string>> = {};
+  if (result.rows.some((row) => !row.full_archive && row.archive_from_month !== null)) {
+    const latest = await query<{ india: string | null; global: string | null }>(
+      `SELECT max(journal_issue_month(month, year)) FILTER (WHERE ${journalEditionSql.india}) AS india,
+              max(journal_issue_month(month, year)) FILTER (WHERE ${journalEditionSql.global}) AS global
+       FROM pv_ibsi_journal_data
+       WHERE redirect_page IS NOT NULL AND btrim(redirect_page) <> ''`
+    );
+    for (const edition of journalEditions) {
+      const month = latest.rows[0]?.[edition];
+      if (month) latestByEdition[edition] = month;
+    }
+  }
+
   const editions: ArchiveAccess["editions"] = {};
   for (const edition of journalEditions) {
     const row = result.rows.find((candidate) => candidate.entitlement_type === journalEntitlement(edition));
@@ -150,9 +172,16 @@ export async function resolveArchiveAccess(
     // whole archive rather than none of it: that combination means missing
     // data on our side, and the wrong way to fail is to take content from
     // someone who paid.
-    editions[edition] = row.full_archive || row.archive_from_month === null
-      ? everything
-      : { fullArchive: false, archiveFromMonth: row.archive_from_month };
+    if (row.full_archive || row.archive_from_month === null) {
+      editions[edition] = everything;
+      continue;
+    }
+    const newest = latestByEdition[edition];
+    editions[edition] = {
+      fullArchive: false,
+      archiveFromMonth:
+        newest && newest < row.archive_from_month ? newest : row.archive_from_month
+    };
   }
 
   return { hasAccess: Object.keys(editions).length > 0, editions };

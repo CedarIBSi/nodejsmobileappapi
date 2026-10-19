@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Router } from "express";
-import { type JournalEdition, journalEditions } from "../lib/catalogue.js";
+import { type JournalEdition, journalEditions, journalEditionSql } from "../lib/catalogue.js";
 import { z } from "zod";
 import { config } from "../config.js";
 import { query } from "../db/pool.js";
@@ -57,14 +57,7 @@ const listSchema = paginationSchema.extend({
   search: z.string().trim().min(1).max(200).optional()
 });
 
-/**
- * SQL for `journalEditionOf`: "india" wins when both words appear, as it
- * does in the classifier, so the two can never disagree about an issue.
- */
-const editionSql: Record<JournalEdition, string> = {
-  india: `edition_type ~* '\\mindia\\M'`,
-  global: `edition_type ~* '\\mglobal\\M' AND edition_type !~* '\\mindia\\M'`
-};
+const editionSql = journalEditionSql;
 const journalParams = z.object({ journal_id: z.string().regex(/^[1-9]\d*$/) });
 const viewParams = z.object({ token: z.string().min(20).max(2048) });
 
